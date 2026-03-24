@@ -161,3 +161,6 @@ hive-mind-prompt-*.txt
 .env
 .env.local
 .env.*.local
+
+# Dolt database files (added by bd init)
+.dolt/

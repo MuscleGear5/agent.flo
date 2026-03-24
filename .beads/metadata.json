@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "agent.flo",
+  "project_id": "6ed85dad-8242-4706-bc72-4632d1ae279b"
+}
