@@ -59,8 +59,15 @@ scan_vulnerabilities() {
 
 check_npm_audit() {
   if [ -f "$PROJECT_ROOT/package-lock.json" ]; then
-    # Skip npm audit for speed - it's slow
-    echo "0"
+    local count
+    count=$(cd "$PROJECT_ROOT" && npm audit --json 2>/dev/null | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print(d.get('metadata',{}).get('vulnerabilities',{}).get('total',0))
+except: print(0)
+" 2>/dev/null)
+    echo "${count:-0}"
   else
     echo "0"
   fi

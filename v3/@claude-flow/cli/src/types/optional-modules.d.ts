@@ -376,3 +376,134 @@ declare module '@xenova/transformers' {
   export const pipeline: any;
   export const env: any;
 }
+
+// ── @claude-flow workspace packages (not yet built) ───────
+
+declare module '@claude-flow/shared' {
+  export const VERSION: string;
+  export interface AgentConfig { [key: string]: any; }
+  export interface TaskConfig { [key: string]: any; }
+  export interface SwarmConfig { [key: string]: any; }
+  export type AgentStatus = 'idle' | 'busy' | 'terminated';
+  export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+}
+
+declare module '@claude-flow/memory' {
+  export class MemoryService { constructor(...args: any[]); store(...args: any[]): Promise<any>; search(...args: any[]): Promise<any[]>; retrieve(...args: any[]): Promise<any>; }
+  export class AgentDB { constructor(...args: any[]); }
+  export class HybridBackend { constructor(...args: any[]); }
+}
+
+declare module '@claude-flow/guidance/compiler' {
+  export class GuidanceCompiler { constructor(...args: any[]); compile(...args: any[]): Promise<any>; }
+  export function compilePolicy(...args: any[]): Promise<any>;
+}
+
+declare module '@claude-flow/guidance/retriever' {
+  export class PolicyRetriever { constructor(...args: any[]); retrieve(...args: any[]): Promise<any>; }
+}
+
+declare module '@claude-flow/guidance/analyzer' {
+  export class ComplianceAnalyzer { constructor(...args: any[]); analyze(...args: any[]): Promise<any>; }
+}
+
+declare module '@claude-flow/guidance/gates' {
+  export class GateEvaluator { constructor(...args: any[]); evaluate(...args: any[]): Promise<any>; }
+}
+
+declare module '@claude-flow/embeddings' {
+  export class EmbeddingService { constructor(...args: any[]); embed(...args: any[]): Promise<number[]>; embedBatch(...args: any[]): Promise<number[][]>; }
+  export function createEmbeddingService(...args: any[]): any;
+}
+
+declare module '@claude-flow/aidefence' {
+  export class AIDefenceGuardian { constructor(...args: any[]); scan(...args: any[]): Promise<any>; }
+  export class InputScanner { constructor(...args: any[]); }
+  export function createDefenceSystem(...args: any[]): any;
+}
+
+declare module '@claude-flow/hooks' {
+  export class HookRunner { constructor(...args: any[]); run(...args: any[]): Promise<any>; }
+  export function registerHook(...args: any[]): void;
+}
+
+declare module '@claude-flow/mcp' {
+  export class MCPServer { constructor(...args: any[]); start(...args: any[]): Promise<any>; }
+  export function createMCPServer(...args: any[]): any;
+}
+
+declare module '@claude-flow/swarm' {
+  export namespace domain {
+    export namespace entities {
+      export class Agent { constructor(...args: any[]); }
+      export class Task { constructor(...args: any[]); }
+    }
+    export namespace repositories {
+      export interface AgentRepository { [key: string]: any; }
+      export interface TaskRepository { [key: string]: any; }
+    }
+  }
+}
+
+declare module '@claude-flow/deployment' {
+  export class DeploymentManager { constructor(...args: any[]); deploy(...args: any[]): Promise<any>; }
+}
+
+// ── @ruvector WASM modules (optional, loaded at runtime) ──
+
+declare module '@ruvector/attention-wasm' {
+  export default function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class FlashAttentionWasm { constructor(...args: any[]); forward(...args: any[]): any; }
+}
+
+declare module '@ruvector/cognitum-gate-kernel' {
+  export default function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class CognitumGate { constructor(...args: any[]); evaluate(...args: any[]): any; }
+}
+
+declare module '@ruvector/exotic-wasm' {
+  export default function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class ExoticTransform { constructor(...args: any[]); apply(...args: any[]): any; }
+}
+
+declare module '@ruvector/gnn-wasm' {
+  export default function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class GnnProcessor { constructor(...args: any[]); forward(...args: any[]): any; }
+}
+
+declare module '@ruvector/hyperbolic-hnsw-wasm' {
+  export default function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class HyperbolicHnsw { constructor(...args: any[]); search(...args: any[]): any[]; add(...args: any[]): void; }
+}
+
+declare module '@ruvector/micro-hnsw-wasm' {
+  export default function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class MicroHnsw { constructor(...args: any[]); search(...args: any[]): any[]; add(...args: any[]): void; }
+}
+
+declare module '@ruvnet/bmssp' {
+  export class BMSSP { constructor(...args: any[]); }
+  export function createBMSSP(...args: any[]): any;
+}
+
+declare module 'prime-radiant-advanced-wasm' {
+  export default function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class PrimeRadiant { constructor(...args: any[]); }
+}
+
+declare module 'agentic-flow/core' {
+  export const core: any;
+  export function createAgent(...args: any[]): any;
+  export function createSwarm(...args: any[]): any;
+}
+
+declare module 'tsup' {
+  export function defineConfig(...args: any[]): any;
+}
