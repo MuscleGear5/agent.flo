@@ -1,12 +1,14 @@
 /**
  * Task MCP Tools for CLI
  *
- * Tool definitions for task management with file persistence.
+ * Tool definitions for task management with file persistence
+ * AND real execution via AgentProcessManager.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MCPTool } from './types.js';
+import { getAgentProcessManager } from '../services/agent-process-manager.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -404,11 +406,38 @@ export const taskTools: MCPTool[] = [
       }
       writeFileSync(agentStorePath, JSON.stringify(agentStore, null, 2), 'utf-8');
 
+      // Dispatch to real agent process (fire-and-forget for each assigned agent)
+      const dispatched: string[] = [];
+      if (!input.unassign && task.assignedTo.length > 0) {
+        const pm = getAgentProcessManager();
+        for (const agentId of task.assignedTo) {
+          try {
+            const running = pm.getAgent(agentId);
+            if (running && running.status !== 'dead') {
+              // Execute async — don't block the MCP response
+              pm.executeTask(agentId, taskId, task.description).catch(() => {
+                // Update task on failure
+                const s = loadTaskStore();
+                if (s.tasks[taskId]) {
+                  s.tasks[taskId].status = 'failed';
+                  s.tasks[taskId].completedAt = new Date().toISOString();
+                  saveTaskStore(s);
+                }
+              });
+              dispatched.push(agentId);
+            }
+          } catch {
+            // Agent not in process manager — skip
+          }
+        }
+      }
+
       return {
         taskId: task.taskId,
         assignedTo: task.assignedTo,
         previouslyAssigned,
         status: task.status,
+        dispatched,
       };
     },
   },
@@ -448,6 +477,94 @@ export const taskTools: MCPTool[] = [
         taskId,
         error: 'Task not found',
       };
+    },
+  },
+  {
+    name: 'task_execute',
+    description: 'Execute a task on a running agent process immediately',
+    category: 'task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'Existing task ID (or auto-creates one)' },
+        agentId: { type: 'string', description: 'Agent to execute on (must be spawned)' },
+        description: { type: 'string', description: 'Task description / prompt' },
+      },
+      required: ['agentId', 'description'],
+    },
+    handler: async (input) => {
+      const agentId = input.agentId as string;
+      const description = input.description as string;
+      const store = loadTaskStore();
+
+      // Create or reuse task record
+      const taskId = (input.taskId as string)
+        || `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      if (!store.tasks[taskId]) {
+        store.tasks[taskId] = {
+          taskId,
+          type: 'execution',
+          description,
+          priority: 'normal',
+          status: 'in_progress',
+          progress: 0,
+          assignedTo: [agentId],
+          tags: ['live-execution'],
+          createdAt: new Date().toISOString(),
+          startedAt: new Date().toISOString(),
+          completedAt: null,
+        };
+        saveTaskStore(store);
+      }
+
+      // Execute on real process
+      const pm = getAgentProcessManager();
+      const agent = pm.getAgent(agentId);
+      if (!agent || agent.status === 'dead') {
+        return {
+          success: false,
+          taskId,
+          agentId,
+          error: `Agent ${agentId} is not running. Spawn it first with agent_spawn.`,
+        };
+      }
+
+      try {
+        const result = await pm.executeTask(agentId, taskId, description);
+
+        // Update task store with result
+        const updated = loadTaskStore();
+        if (updated.tasks[taskId]) {
+          updated.tasks[taskId].status = result.status === 'completed' ? 'completed' : 'failed';
+          updated.tasks[taskId].completedAt = result.completedAt?.toISOString() ?? new Date().toISOString();
+          updated.tasks[taskId].progress = result.status === 'completed' ? 100 : 0;
+          updated.tasks[taskId].result = {
+            output: result.output?.slice(0, 2000),
+            error: result.error,
+          };
+          saveTaskStore(updated);
+        }
+
+        return {
+          success: result.status === 'completed',
+          taskId,
+          agentId,
+          status: result.status,
+          output: result.output?.slice(0, 2000),
+          error: result.error,
+          durationMs: result.completedAt && result.startedAt
+            ? new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()
+            : undefined,
+        };
+      } catch (err) {
+        return {
+          success: false,
+          taskId,
+          agentId,
+          error: (err as Error).message,
+        };
+      }
     },
   },
 ];

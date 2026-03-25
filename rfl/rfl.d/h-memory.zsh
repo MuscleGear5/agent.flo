@@ -26,7 +26,7 @@ if ml:
         else: print(f'{str(m)[:40]}|')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border bold --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(empty)%f"
       fi
@@ -64,7 +64,7 @@ if rs:
         local body=$(echo "$_table" | tail -n +2)
         print -P "  %F{245}$header%f"
         if [[ -n "$body" && $(echo "$body" | wc -l) -gt 1 ]]; then
-          echo "$body" | gum table --separator '|' --border bold --print
+          echo "$body" | gum table --separator '|' --border thick --print
         else
           print -P "  %F{245}(no matches)%f"
         fi

@@ -16,11 +16,8 @@ import { cpus } from 'os';
 import { join } from 'path';
 import {
   HeadlessWorkerExecutor,
-  HEADLESS_WORKER_TYPES,
-  HEADLESS_WORKER_CONFIGS,
   isHeadlessWorker,
   type HeadlessWorkerType,
-  type HeadlessExecutionResult,
 } from './headless-worker-executor.js';
 
 // Worker types matching hooks-tools.ts
@@ -99,8 +96,8 @@ const DEFAULT_WORKERS: WorkerConfigInternal[] = [
   { type: 'optimize', intervalMs: 15 * 60 * 1000, offsetMs: 4 * 60 * 1000, priority: 'high', description: 'Performance optimization', enabled: true },
   { type: 'consolidate', intervalMs: 30 * 60 * 1000, offsetMs: 6 * 60 * 1000, priority: 'low', description: 'Memory consolidation', enabled: true },
   { type: 'testgaps', intervalMs: 20 * 60 * 1000, offsetMs: 8 * 60 * 1000, priority: 'normal', description: 'Test coverage analysis', enabled: true },
-  { type: 'predict', intervalMs: 10 * 60 * 1000, offsetMs: 0, priority: 'low', description: 'Predictive preloading', enabled: false },
-  { type: 'document', intervalMs: 60 * 60 * 1000, offsetMs: 0, priority: 'low', description: 'Auto-documentation', enabled: false },
+  { type: 'predict', intervalMs: 10 * 60 * 1000, offsetMs: 10 * 60 * 1000, priority: 'normal', description: 'Predictive preloading', enabled: true },
+  { type: 'document', intervalMs: 30 * 60 * 1000, offsetMs: 12 * 60 * 1000, priority: 'normal', description: 'Auto-documentation', enabled: true },
 ];
 
 // Worker timeout (5 minutes max per worker)
@@ -403,13 +400,14 @@ export class WorkerDaemon extends EventEmitter {
           for (const [type, state] of Object.entries(saved.workers)) {
             const savedState = state as Record<string, unknown>;
             const lastRunValue = savedState.lastRun;
+            const nextRunValue = savedState.nextRun;
             this.workers.set(type as WorkerType, {
               runCount: (savedState.runCount as number) || 0,
               successCount: (savedState.successCount as number) || 0,
               failureCount: (savedState.failureCount as number) || 0,
               averageDurationMs: (savedState.averageDurationMs as number) || 0,
               lastRun: lastRunValue ? new Date(lastRunValue as string) : undefined,
-              nextRun: undefined,
+              nextRun: nextRunValue ? new Date(nextRunValue as string) : undefined,
               isRunning: false,
             });
           }
@@ -523,6 +521,7 @@ export class WorkerDaemon extends EventEmitter {
         const timer = setTimeout(runAndReschedule, workerConfig.intervalMs);
         this.timers.set(workerConfig.type, timer);
         state.nextRun = new Date(Date.now() + workerConfig.intervalMs);
+        this.saveState();
       }
     };
 
@@ -688,7 +687,9 @@ export class WorkerDaemon extends EventEmitter {
    */
   private async runWorkerLogic(workerConfig: WorkerConfig): Promise<unknown> {
     // Check if this is a headless worker type and headless execution is available
-    if (isHeadlessWorker(workerConfig.type) && this.headlessAvailable && this.headlessExecutor) {
+    // predict and document use claudish (custom providers) — skip headless (Anthropic)
+    const useClaudish = workerConfig.type === 'predict' || workerConfig.type === 'document';
+    if (!useClaudish && isHeadlessWorker(workerConfig.type) && this.headlessAvailable && this.headlessExecutor) {
       try {
         this.log('info', `Running ${workerConfig.type} in headless mode (Claude Code AI)`);
         const result = await this.headlessExecutor.execute(workerConfig.type as HeadlessWorkerType);
@@ -870,31 +871,103 @@ export class WorkerDaemon extends EventEmitter {
    * Local predict worker (fallback when headless unavailable)
    */
   private async runPredictWorkerLocal(): Promise<unknown> {
-    return {
-      timestamp: new Date().toISOString(),
-      mode: 'local',
-      predictions: [],
-      preloaded: [],
-      note: 'Install Claude Code CLI for AI-powered predictions',
-    };
+    const metricsDir = join(this.projectRoot, '.claude-flow', 'metrics');
+    const outFile = join(metricsDir, 'predict-results.json');
+    if (!existsSync(metricsDir)) mkdirSync(metricsDir, { recursive: true });
+
+    try {
+      const result = await this.runClaudish(
+        'deepseek-v3.1:671b',
+        'List the 3 most recently modified source files and predict which file the developer will edit next. Reply with only JSON: {"filesToPreload":["path1"],"testsToRun":["path1"],"confidence":0.8}',
+        300000,
+      );
+      const parsed = { timestamp: new Date().toISOString(), mode: 'claudish', ...this.tryParseJSON(result) };
+      writeFileSync(outFile, JSON.stringify(parsed, null, 2));
+      return parsed;
+    } catch (error) {
+      const fallback = { timestamp: new Date().toISOString(), mode: 'local-fallback', predictions: [], error: String(error) };
+      writeFileSync(outFile, JSON.stringify(fallback, null, 2));
+      return fallback;
+    }
   }
 
   /**
-   * Local document worker (fallback when headless unavailable)
+   * Local document worker — uses claudish with custom providers
    */
   private async runDocumentWorkerLocal(): Promise<unknown> {
-    return {
-      timestamp: new Date().toISOString(),
-      mode: 'local',
-      filesDocumented: 0,
-      suggestedDocs: [],
-      note: 'Install Claude Code CLI for AI-powered documentation generation',
-    };
+    const metricsDir = join(this.projectRoot, '.claude-flow', 'metrics');
+    const outFile = join(metricsDir, 'document-results.json');
+    if (!existsSync(metricsDir)) mkdirSync(metricsDir, { recursive: true });
+
+    try {
+      const result = await this.runClaudish(
+        'devstral-small-2:24b',
+        'Find the top 3 exported functions missing JSDoc comments. Reply with only JSON: {"filesDocumented":3,"suggestions":[{"file":"path","symbol":"name","jsdoc":"/** ... */"}]}',
+        300000,
+      );
+      const parsed = { timestamp: new Date().toISOString(), mode: 'claudish', ...this.tryParseJSON(result) };
+      writeFileSync(outFile, JSON.stringify(parsed, null, 2));
+      return parsed;
+    } catch (error) {
+      const fallback = { timestamp: new Date().toISOString(), mode: 'local-fallback', filesDocumented: 0, error: String(error) };
+      writeFileSync(outFile, JSON.stringify(fallback, null, 2));
+      return fallback;
+    }
   }
 
   /**
    * Local ultralearn worker (fallback when headless unavailable)
    */
+  /**
+   * Call OllamaCloud API directly (no claudish/Claude Code bootstrap overhead).
+   * Uses OLLAMA_API_KEY from env. Models: deepseek-v3.1:671b-cloud, devstral-small-2:24b-cloud, etc.
+   */
+  private async runClaudish(model: string, prompt: string, _timeoutMs = 120000): Promise<string> {
+    const apiKey = process.env.OLLAMA_API_KEY;
+    if (!apiKey) throw new Error('OLLAMA_API_KEY not set');
+
+    const baseUrl = process.env.OLLAMACLOUD_BASE_URL || 'https://ollama.com';
+    const url = `${baseUrl}/api/chat`;
+    const body = JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      stream: false,
+    });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), _timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body,
+        signal: controller.signal,
+      });
+      const data = await res.json() as Record<string, unknown>;
+      const msg = data?.message as Record<string, unknown> | undefined;
+      return (msg?.content as string) ?? JSON.stringify(data);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Try to parse JSON from a string that may contain markdown fences or preamble.
+   */
+  private tryParseJSON(raw: string): Record<string, unknown> {
+    // Strip markdown code fences if present
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const cleaned = fenced ? fenced[1].trim() : raw.trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      return { rawOutput: raw };
+    }
+  }
+
   private async runUltralearnWorkerLocal(): Promise<unknown> {
     return {
       timestamp: new Date().toISOString(),

@@ -108,6 +108,22 @@ except Exception as e: print(f'  [error] {e}')
       _out=$(_rfl_spin "Training ($mtype)..." ruflo mcp exec --tool neural_train -p "$pj")
       if [[ "$_out" == *'"success"'*true* ]]; then
         print -P "%F{48}[OK]%f Training started (%F{245}$mtype%f)"
+        echo ""
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  txt=sys.stdin.read(); d=pj(txt)
+  rows=[]
+  for k in ('modelId','type','status','accuracy','epochs','trainedAt'):
+    v=d.get(k,'')
+    if v not in (None,'',True):
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append(f'{k}|{v}')
+  if rows:
+    print('Field|Value')
+    for r in rows: print(r)
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null | gum table --separator '|' --border thick --print
       else
         print -P "%F{196}[x] Training failed%f"; echo "$_out"
       fi

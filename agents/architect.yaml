@@ -1,11 +1,6 @@
 # architect agent configuration
 type: architect
 version: "3.0.0"
-provider: deepseek
-model: deepseek-reasoner
-fallback:
-  provider: zai
-  model: glm-5
 capabilities:
   - system-design
   - api-design
@@ -13,4 +8,4 @@ capabilities:
 optimizations:
   - context-caching
   - memory-persistence
-createdAt: "2026-02-11T22:34:36.389Z"
+createdAt: "2026-03-25T03:03:46.161Z"

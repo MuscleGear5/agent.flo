@@ -1,15 +1,10 @@
 # tester agent configuration
 type: tester
 version: "3.0.0"
-provider: minimax
-model: MiniMax-M2.7
-fallback:
-  provider: zai
-  model: glm-5-turbo
 capabilities:
   - unit-testing
   - integration-testing
   - coverage
 optimizations:
   - parallel-execution
-createdAt: "2026-02-11T22:34:36.389Z"
+createdAt: "2026-03-25T03:03:46.161Z"

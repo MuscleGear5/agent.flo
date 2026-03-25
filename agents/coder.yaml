@@ -1,11 +1,6 @@
 # coder agent configuration
 type: coder
 version: "3.0.0"
-provider: zai
-model: glm-5
-fallback:
-  provider: minimax
-  model: MiniMax-M2.7
 capabilities:
   - code-generation
   - refactoring
@@ -13,4 +8,4 @@ capabilities:
 optimizations:
   - flash-attention
   - token-reduction
-createdAt: "2026-02-11T22:34:36.389Z"
+createdAt: "2026-03-25T03:03:46.161Z"

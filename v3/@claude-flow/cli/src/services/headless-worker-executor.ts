@@ -22,7 +22,7 @@
 import { spawn, execSync, type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
-import { join, relative } from 'path';
+import { join } from 'path';
 import type { WorkerType } from './worker-daemon.js';
 
 // ============================================
@@ -360,10 +360,10 @@ For each gap, provide a test skeleton.`,
   document: {
     type: 'document',
     mode: 'headless',
-    intervalMs: 120 * 60 * 1000,
-    priority: 'low',
+    intervalMs: 30 * 60 * 1000,
+    priority: 'normal',
     description: 'AI documentation generation',
-    enabled: false,
+    enabled: true,
     headless: {
       promptTemplate: `Generate documentation for undocumented code:
 - Add JSDoc comments to functions
@@ -463,9 +463,9 @@ Provide comprehensive report.`,
     type: 'predict',
     mode: 'headless',
     intervalMs: 10 * 60 * 1000,
-    priority: 'low',
+    priority: 'normal',
     description: 'Predictive preloading',
-    enabled: false,
+    enabled: true,
     headless: {
       promptTemplate: `Based on recent activity, predict what the developer needs:
 - Files likely to be edited next
@@ -1262,7 +1262,7 @@ Analyze the above codebase context and provide your response following the forma
 
     // Extract code blocks first
     const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
-    let codeMatch;
+    let codeMatch: RegExpExecArray | null;
     while ((codeMatch = codeBlockRegex.exec(output)) !== null) {
       codeBlocks.push({
         language: codeMatch[1] || 'text',

@@ -1,15 +1,10 @@
 # security-architect agent configuration
 type: security-architect
 version: "3.0.0"
-provider: deepseek
-model: deepseek-reasoner
-fallback:
-  provider: zai
-  model: glm-5
 capabilities:
   - threat-modeling
   - vulnerability-analysis
   - security-review
 optimizations:
   - pattern-matching
-createdAt: "2026-02-11T22:34:36.389Z"
+createdAt: "2026-03-25T03:03:46.161Z"

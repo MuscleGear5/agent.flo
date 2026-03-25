@@ -91,7 +91,7 @@ if hooks:
     print(f'{n}|{t}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border bold --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(no hooks)%f"
       fi
@@ -142,7 +142,7 @@ else:
         for r in rows: print(r)
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border bold --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         echo "$_out" | _rfl_colorize
       fi

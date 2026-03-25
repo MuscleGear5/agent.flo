@@ -1,13 +1,15 @@
 /**
  * Agent MCP Tools for CLI
  *
- * Tool definitions for agent lifecycle management with file persistence.
+ * Tool definitions for agent lifecycle management with file persistence
+ * AND real process execution via AgentProcessManager.
  * Includes model routing integration for intelligent model selection.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MCPTool } from './types.js';
+import { getAgentProcessManager, type AgentModel } from '../services/agent-process-manager.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -232,6 +234,29 @@ export const agentTools: MCPTool[] = [
       store.agents[agentId] = agent;
       saveAgentStore(store);
 
+      // Start a real process via AgentProcessManager
+      let pid: number | null = null;
+      let processStatus = 'spawned';
+      try {
+        const pm = getAgentProcessManager();
+        const running = await pm.spawn({
+          agentId,
+          agentType,
+          model: (routingResult.model as AgentModel) || 'sonnet',
+          timeoutMs: 5 * 60 * 1000,
+        });
+        pid = running.pid;
+        processStatus = running.status;
+        // Update store with real PID
+        store.agents[agentId].status = processStatus === 'idle' ? 'idle' : 'busy';
+        saveAgentStore(store);
+      } catch (procError) {
+        // Process spawn failed — agent record still exists but no process
+        processStatus = 'spawn_failed';
+        (agent.config as Record<string, unknown>).processError = (procError as Error).message;
+        saveAgentStore(store);
+      }
+
       // Include Agent Booster routing info if applicable
       const response: Record<string, unknown> = {
         success: true,
@@ -239,7 +264,8 @@ export const agentTools: MCPTool[] = [
         agentType: agent.agentType,
         model: agent.model,
         modelRoutedBy: routingResult.routedBy,
-        status: 'spawned',
+        status: processStatus,
+        pid: pid || undefined,
         createdAt: agent.createdAt,
       };
 
@@ -275,10 +301,21 @@ export const agentTools: MCPTool[] = [
       if (store.agents[agentId]) {
         store.agents[agentId].status = 'terminated';
         saveAgentStore(store);
+
+        // Kill real process if running
+        let processKilled = false;
+        try {
+          const pm = getAgentProcessManager();
+          processKilled = pm.terminate(agentId, !!input.force);
+        } catch {
+          // Process manager may not have this agent
+        }
+
         return {
           success: true,
           agentId,
           terminated: true,
+          processKilled,
           terminatedAt: new Date().toISOString(),
         };
       }
@@ -307,6 +344,24 @@ export const agentTools: MCPTool[] = [
       const agent = store.agents[agentId];
 
       if (agent) {
+        // Enrich with real process info
+        let processInfo: Record<string, unknown> = {};
+        try {
+          const pm = getAgentProcessManager();
+          const running = pm.getAgent(agentId);
+          if (running && running.status !== 'dead') {
+            processInfo = {
+              pid: running.pid,
+              processStatus: running.status,
+              uptimeMs: Date.now() - running.startedAt.getTime(),
+              currentTask: running.currentTask,
+              processTaskCount: running.taskCount,
+            };
+          }
+        } catch {
+          // Process manager may not be available
+        }
+
         return {
           agentId: agent.agentId,
           agentType: agent.agentType,
@@ -315,6 +370,7 @@ export const agentTools: MCPTool[] = [
           taskCount: agent.taskCount,
           createdAt: agent.createdAt,
           domain: agent.domain,
+          ...processInfo,
         };
       }
 
@@ -397,7 +453,6 @@ export const agentTools: MCPTool[] = [
           byType[agent.agentType] = (byType[agent.agentType] || 0) + 1;
           byStatus[agent.status] = (byStatus[agent.status] || 0) + 1;
         }
-        const idleAgents = agents.filter(a => a.status === 'idle').length;
         const busyAgents = agents.filter(a => a.status === 'busy').length;
         const utilization = agents.length > 0 ? busyAgents / agents.length : 0;
         return {

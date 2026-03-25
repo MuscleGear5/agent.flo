@@ -47,7 +47,7 @@ if t:
         print(f'{k}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border bold --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(not found: $tid)%f"
       fi
