@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 import time
 from collections.abc import Callable
 
@@ -41,6 +42,21 @@ _CLI_PASSTHROUGH: frozenset[str] = frozenset({
     "init_check",
     "daemon_start", "daemon_stop", "daemon_status", "daemon_restart",
     "daemon_logs", "daemon_enable",
+})
+
+# Commands that define params but work fine with no args (params are optional filters)
+_OPTIONAL_PARAMS: frozenset[str] = frozenset({
+    "neural_patterns", "neural_benchmark", "neural_optimize", "neural_list",
+    "embeddings_status", "embeddings_init",
+    "performance_metrics", "performance_benchmark", "performance_bottleneck",
+    "analyze_code", "analyze_deps", "analyze_complexity", "analyze_imports",
+    "analyze_circular", "analyze_boundaries", "analyze_modules",
+    "analyze_dependencies",
+    "hooks_metrics", "hooks_list", "hooks_intelligence",
+    "memory_list", "memory_stats",
+    "session_list", "session_current",
+    "plugins_list", "claims_list", "issues_list",
+    "guidance_status",
 })
 
 
@@ -93,10 +109,16 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
     params = args or _args_from_list(cmd, sub, extra_args)
 
     # If command needs params and none provided, prompt interactively
+    # Skip prompting for commands with all-optional params or when not on a TTY
     if not params and "params" in cmd_def:
-        params = _prompt_params(cmd_def)
-        if params is None:  # User cancelled
-            return
+        handler_key = f"{cmd}_{sub}"
+        if handler_key not in _OPTIONAL_PARAMS:
+            if sys.stdin.isatty():
+                params = _prompt_params(cmd_def)
+                if params is None:  # User cancelled
+                    return
+            else:
+                params = {}
 
     with ui.spin(f"Running {cmd} {sub}..."):
         result = mcp_exec(tool, params if params else None)
@@ -142,21 +164,25 @@ def _prompt_params(cmd_def: dict) -> dict | None:
 
     The FIRST parameter is required (empty = cancel).  Subsequent parameters
     are optional -- empty input skips them rather than cancelling.
+    Returns empty dict if stdin is not a TTY.
     """
+    if not sys.stdin.isatty():
+        return {}
     params: dict = {}
     param_list = cmd_def.get("params", [])
     for i, p in enumerate(param_list):
-        if i == 0:
-            # First param is required
-            val = Prompt.ask(f"  {p}")
-            if not val:
-                return None
-            params[p] = val
-        else:
-            # Subsequent params are optional
-            val = Prompt.ask(f"  {p} (optional)", default="")
-            if val:
+        try:
+            if i == 0:
+                val = Prompt.ask(f"  {p}")
+                if not val:
+                    return None
                 params[p] = val
+            else:
+                val = Prompt.ask(f"  {p} (optional)", default="")
+                if val:
+                    params[p] = val
+        except EOFError:
+            return params if params else {}
     return params
 
 
