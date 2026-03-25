@@ -161,6 +161,124 @@ else: print('  (no data)')
       echo ""
       ;;
 
+    init)
+      local _out
+      _out=$(_rfl_spin "Initializing memory..." ruflo memory init --force --verbose)
+      if [[ "$_out" == *success* || "$_out" == *initialized* || "$_out" == *created* ]]; then
+        print -P "%F{48}[OK]%f Memory initialized"
+      else
+        print -P "%F{196}[x] Init failed%f"
+      fi
+      echo "$_out" | _rfl_colorize
+      ;;
+    configure)
+      local key="${1//__RFL_SP__/ }" val="${2//__RFL_SP__/ }"
+      key="${key//\"/}"; val="${val//\"/}"
+      if [[ -z "$key" ]]; then
+        local _out
+        _out=$(_rfl_spin "Loading memory config..." ruflo mcp exec --tool memory_stats -p "{}")
+        echo ""
+        print -P "%BMemory Config%b"
+        if [[ "$_out" == *'{'* ]]; then
+          echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  d=pj(sys.stdin.read())
+  rows=[]
+  for k,v in d.items():
+    if k not in ('success',) and v not in (None,''):
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Setting','Value'], rows))
+  else: print('  (no data)')
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+        fi
+        echo ""
+      else
+        local _out
+        _out=$(_rfl_spin "Configuring..." ruflo memory configure --key "$key" --value "$val")
+        echo "$_out" | _rfl_colorize
+      fi
+      ;;
+    cleanup)
+      gum confirm "Clean up stale memory entries?" --affirmative "Yes" --negative "No" || return 0
+      local _out
+      _out=$(_rfl_spin "Cleaning up..." ruflo memory cleanup)
+      if [[ "$_out" == *success* || "$_out" == *cleaned* || "$_out" == *removed* ]]; then
+        print -P "%F{48}[OK]%f Memory cleanup complete"
+      else
+        print -P "%F{245}Cleanup finished%f"
+      fi
+      echo "$_out" | _rfl_colorize
+      ;;
+    compress)
+      local _out
+      _out=$(_rfl_spin "Compressing..." ruflo mcp exec --tool neural_compress -p "{}")
+      echo ""
+      print -P "%BMemory Compress%b"
+      if [[ "$_out" == *'{'* ]]; then
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  d=pj(sys.stdin.read())
+  rows=[]
+  for k,v in d.items():
+    if k not in ('success',) and v not in (None,''):
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+  else: print('  (no data)')
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        echo "$_out" | _rfl_colorize
+      fi
+      echo ""
+      ;;
+    export)
+      local path="${1//__RFL_SP__/ }"
+      path="${path//\"/}"
+      local _out
+      _out=$(_rfl_spin "Exporting..." ruflo mcp exec --tool config_export -p "{}")
+      if [[ "$_out" == *'{'* ]]; then
+        if [[ -n "$path" ]]; then
+          echo "$_out" > "$path"
+          print -P "%F{48}[OK]%f Memory exported to %F{96}$path%f"
+        else
+          echo ""
+          print -P "%BMemory Export%b"
+          echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  d=pj(sys.stdin.read())
+  rows=[]
+  for k,v in d.items():
+    if k not in ('success',) and v not in (None,''):
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+        fi
+      else
+        echo "$_out" | _rfl_colorize
+      fi
+      echo ""
+      ;;
+    import)
+      local source="${1//__RFL_SP__/ }"
+      source="${source//\"/}"
+      [[ -z "$source" ]] && { print -P "%F{196}[ERROR] No source path%f"; return 1; }
+      local _out
+      _out=$(_rfl_spin "Importing..." ruflo mcp exec --tool config_import -p "{\"path\":\"$(_rfl_json_esc "$source")\"}")
+      if [[ "$_out" == *'"success"'*true* ]]; then
+        print -P "%F{48}[OK]%f Memory imported from %F{96}$source%f"
+      else
+        print -P "%F{196}[x] Import failed%f"; echo "$_out"
+      fi
+      ;;
+
     *) return 1 ;;
   esac
 }

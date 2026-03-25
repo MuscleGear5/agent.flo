@@ -96,6 +96,34 @@ except: pass
       fi
       echo ""
       ;;
+    export)
+      local sid="${1//\"/}"
+      echo ""
+      print -P "%BSession Export%b"
+      echo ""
+      local pj="{}"
+      [[ -n "$sid" ]] && pj="{\"sessionId\":\"$(_rfl_json_esc "$sid")\"}"
+      local _out
+      _out=$(_rfl_spin "Exporting..." ruflo session export ${sid:+--session-id "$sid"})
+      if [[ -n "$_out" ]]; then
+        echo "$_out" | _rfl_colorize
+      else
+        print -P "  %F{245}(no data)%f"
+      fi
+      echo ""
+      ;;
+    import)
+      local source="${1//__RFL_SP__/ }"
+      source="${source//\"/}"
+      [[ -z "$source" ]] && { print -P "%F{196}[ERROR] No source path%f"; return 1; }
+      local _out
+      _out=$(_rfl_spin "Importing..." ruflo session import "$source")
+      if [[ "$_out" == *success* || "$_out" == *restored* || "$_out" == *imported* ]]; then
+        print -P "%F{48}[OK]%f Session imported"
+      else
+        print -P "%F{196}[x] Import failed%f"; echo "$_out"
+      fi
+      ;;
     *) return 1 ;;
   esac
 }

@@ -120,6 +120,34 @@ except: pass
       fi
       echo ""
       ;;
+    validate)
+      local wid="${1//\"/}"
+      [[ -z "$wid" ]] && { print -P "%F{196}[ERROR] No workflow ID or template%f"; return 1; }
+      echo ""
+      print -P "%BWorkflow Validate%b"
+      echo ""
+      local _out
+      _out=$(_rfl_spin "Validating..." ruflo workflow validate "$wid")
+      if [[ "$_out" == *'{'* ]]; then
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  d=pj(sys.stdin.read())
+  rows=[]
+  for k,v in d.items():
+    if k not in ('success',) and v not in (None,''):
+      if isinstance(v,list): v=', '.join(str(x) for x in v[:5])
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+  else: print('  (no data)')
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        echo "$_out" | _rfl_colorize
+      fi
+      echo ""
+      ;;
     *) return 1 ;;
   esac
 }
