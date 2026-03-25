@@ -154,6 +154,17 @@ except: pass
         print -P "%F{196}[x] Complete failed%f"; echo "$_tco_out"
       fi
       ;;
+    retry)
+      local tid="${1//\"/}"
+      [[ -z "$tid" ]] && { print -P "%F{196}[ERROR] No task ID%f"; return 1; }
+      local _out
+      _out=$(_rfl_spin "Retrying task..." ruflo mcp exec --tool task_update -p "{\"taskId\":\"$tid\",\"status\":\"pending\"}")
+      if [[ "$_out" == *'"success"'*true* || "$_out" == *'"status"'* ]]; then
+        print -P "%F{48}[OK]%f Task %F{245}$tid%f requeued"
+      else
+        print -P "%F{196}[x] Retry failed%f"; echo "$_out"
+      fi
+      ;;
     *) return 1 ;;
   esac
 }
