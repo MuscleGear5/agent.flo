@@ -65,7 +65,7 @@ except Exception as e: print(f'  [error] {e}')
       echo ""
       ;;
     predict)
-      local input="${*//\"/}"
+      local input="${*}"
       input="${input//__RFL_SP__/ }"
       [[ -z "$input" ]] && { print -P "%F{196}[ERROR] No input provided%f"; return 1; }
       local _out
@@ -108,9 +108,9 @@ except Exception as e: print(f'  [error] {e}')
       local -a flags=()
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --epochs)        shift; flags+=('"epochs":'$1) ;;
-          --batch-size)    shift; flags+=('"batchSize":'$1) ;;
-          --learning-rate) shift; flags+=('"learningRate":'$1) ;;
+          --epochs)        shift; [[ "$1" =~ ^[0-9]+$ ]] && flags+=('"epochs":'$1) ;;
+          --batch-size)    shift; [[ "$1" =~ ^[0-9]+$ ]] && flags+=('"batchSize":'$1) ;;
+          --learning-rate) shift; [[ "$1" =~ ^[0-9.]+$ ]] && flags+=('"learningRate":'$1) ;;
           --type)          shift; mtype="${1//\"/}" ;;
           *)               [[ "$1" == *=* ]] || mtype="${1//\"/}" ;;
         esac

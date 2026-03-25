@@ -103,6 +103,33 @@ export const taskTools: MCPTool[] = [
       };
 
       store.tasks[taskId] = task;
+
+      // If agents are assigned at creation, auto-dispatch execution
+      const dispatched: string[] = [];
+      if (task.assignedTo.length > 0) {
+        task.status = 'in_progress';
+        task.startedAt = new Date().toISOString();
+        const pm = getAgentProcessManager();
+        for (const agentId of task.assignedTo) {
+          try {
+            const running = pm.getAgent(agentId);
+            if (running && running.status !== 'dead') {
+              pm.executeTask(agentId, taskId, task.description).catch(() => {
+                const s = loadTaskStore();
+                if (s.tasks[taskId]) {
+                  s.tasks[taskId].status = 'failed';
+                  s.tasks[taskId].completedAt = new Date().toISOString();
+                  saveTaskStore(s);
+                }
+              });
+              dispatched.push(agentId);
+            }
+          } catch {
+            // Agent not in process manager — skip
+          }
+        }
+      }
+
       saveTaskStore(store);
 
       return {
@@ -114,6 +141,7 @@ export const taskTools: MCPTool[] = [
         createdAt: task.createdAt,
         assignedTo: task.assignedTo,
         tags: task.tags,
+        dispatched: dispatched.length > 0 ? dispatched : undefined,
       };
     },
   },
@@ -244,7 +272,7 @@ export const taskTools: MCPTool[] = [
 
         // Sync assigned agents back to idle and increment taskCount
         if (task.assignedTo.length > 0) {
-          const agentStorePath = join(process.cwd(), STORAGE_DIR, 'agents.json');
+          const agentStorePath = join(process.cwd(), STORAGE_DIR, 'agents', 'store.json');
           try {
             let agentStore: { agents: Record<string, Record<string, unknown>> } = { agents: {} };
             if (existsSync(agentStorePath)) {
