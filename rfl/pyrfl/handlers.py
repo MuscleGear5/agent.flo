@@ -55,6 +55,7 @@ _OPTIONAL_PARAMS: frozenset[str] = frozenset({
     "analyze_dependencies",
     "hooks_metrics", "hooks_list", "hooks_intelligence",
     "memory_list", "memory_stats",
+    "swarm_status", "swarm_stop",
     "session_list", "session_current",
     "plugins_list", "claims_list", "issues_list",
     "guidance_status",
@@ -160,8 +161,60 @@ def _args_from_list(cmd: str, sub: str, extra_args: list[str] | None) -> dict:
     return result
 
 
+def _smart_pick(param_name: str, label: str = "") -> str | None:
+    """Auto-detect ID-like param names and present the right dynamic picker.
+
+    Returns the selected value, or None if the user cancelled / nothing found.
+    Falls back to Prompt.ask for unrecognised param names.
+    """
+    lbl = label or param_name
+    pn = param_name.lower()
+
+    if pn in ("agentid", "agentids", "targetagentid"):
+        return _pick_agent(lbl)
+    if pn in ("taskid",):
+        return _pick_task(lbl)
+    if pn in ("sessionid",):
+        return _pick_session(lbl)
+    if pn in ("modelid", "model"):
+        return _pick_model(lbl)
+    if pn == "key":
+        return _pick_memory_key(lbl) or _pick_config_key(lbl)
+    if pn in ("claimid", "issueid", "resourceid"):
+        # Try claims/issues list
+        result = mcp_exec("claims_list")
+        items = result.get("claims", result.get("items", []))
+        if not items:
+            result = mcp_exec("task_list")
+            items = result.get("tasks", [])
+        if items:
+            choices = []
+            for it in items:
+                cid = it.get("claimId", it.get("issueId", it.get("id", "?")))
+                st = it.get("status", "?")
+                desc = str(it.get("description", it.get("resource", "")))[:30]
+                choices.append(f"{cid}  [{st}]  {desc}")
+            sel = ui.choose(lbl, choices)
+            return sel.split()[0] if sel else None
+        return Prompt.ask(f"  {lbl}")
+    if pn == "swarmid":
+        # Try swarm list — usually just one active swarm
+        result = mcp_exec("swarm_status")
+        sid = result.get("swarmId", result.get("id", ""))
+        if sid:
+            return sid  # Auto-select the only active swarm
+        return Prompt.ask(f"  {lbl}")
+
+    # Not an ID — fall back to text prompt
+    return None
+
+
 def _prompt_params(cmd_def: dict) -> dict | None:
-    """Interactively prompt for parameters.
+    """Interactively prompt for parameters with smart dynamic pickers.
+
+    ID-like params (agentId, taskId, sessionId, modelId, swarmId, claimId, key)
+    are auto-detected and presented as live selection pickers.
+    Non-ID params use standard text prompts.
 
     The FIRST parameter is required (empty = cancel).  Subsequent parameters
     are optional -- empty input skips them rather than cancelling.
@@ -173,6 +226,13 @@ def _prompt_params(cmd_def: dict) -> dict | None:
     param_list = cmd_def.get("params", [])
     for i, p in enumerate(param_list):
         try:
+            # Try smart picker for ID-like params
+            picked = _smart_pick(p, p)
+            if picked is not None:
+                params[p] = picked
+                continue
+
+            # Standard text prompt
             if i == 0:
                 val = Prompt.ask(f"  {p}")
                 if not val:
