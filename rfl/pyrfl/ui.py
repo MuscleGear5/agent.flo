@@ -289,12 +289,18 @@ def success_panel(title: str, msg: str, hints: list[str] | None = None):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Spinners & progress
+# Spinners & progress — [green]####[/][dim]----[/] bar (see progress.py)
 # ══════════════════════════════════════════════════════════════════════════
 
+import importlib as _importlib
+_progress = _importlib.import_module(".progress", __name__.rsplit(".", 1)[0])
+_HashBarColumn = _progress.HashBarColumn
+_Spin = _progress.Spin
+
+
 def spin(msg: str):
-    """Context manager for spinner."""
-    return console.status(msg, spinner="dots")
+    """Context manager — green dots spinner + hash progress bar + elapsed time."""
+    return _Spin(msg, console=console)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -335,35 +341,25 @@ def confirm(label: str, default: bool = False) -> bool:
     return Confirm.ask(label, default=default)
 
 
-def _flush_tty():
-    """Drain queued input (mouse events etc) from the tty before fzf."""
-    try:
-        import termios, os
-        fd = os.open("/dev/tty", os.O_RDONLY | os.O_NONBLOCK)
-        try:
-            termios.tcflush(fd, termios.TCIFLUSH)
-        finally:
-            os.close(fd)
-    except (ImportError, OSError):
-        pass
-
-
 def choose(label: str, choices: list[str]) -> str | None:
     """fzf selector — falls back to Rich numbered prompt."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            _flush_tty()
-            proc = subprocess.run(
-                ["fzf", "--no-sort", "--no-mouse",
+            # fzf reads keyboard from /dev/tty — pipe choices via stdin,
+            # capture selection on stdout, let stderr inherit the terminal.
+            proc = subprocess.Popen(
+                ["fzf", "--no-sort",
                  f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
                  "--pointer=>", "--no-info"],
-                input="\n".join(choices),
-                capture_output=True, text=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=None,  # inherit terminal
             )
-            if proc.returncode == 0 and proc.stdout.strip():
-                return proc.stdout.strip()
+            stdout, _ = proc.communicate(input="\n".join(choices).encode())
+            if proc.returncode == 0 and stdout.strip():
+                return stdout.decode().strip()
             return None
         except Exception:
             pass
@@ -388,19 +384,20 @@ def multi_choose(label: str, choices: list[str]) -> list[str]:
     """fzf multi-select — falls back to Rich comma-separated input."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            _flush_tty()
-            proc = subprocess.run(
-                ["fzf", "--multi", "--no-sort", "--no-mouse",
+            proc = subprocess.Popen(
+                ["fzf", "--multi", "--no-sort",
                  f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
                  "--pointer=>", "--marker=*", "--no-info",
                  "--header=  space toggle  │  enter confirm  │  esc cancel"],
-                input="\n".join(choices),
-                capture_output=True, text=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=None,  # inherit terminal
             )
-            if proc.returncode == 0 and proc.stdout.strip():
-                return [ln for ln in proc.stdout.strip().split("\n") if ln]
+            stdout, _ = proc.communicate(input="\n".join(choices).encode())
+            if proc.returncode == 0 and stdout.strip():
+                return [ln for ln in stdout.decode().strip().split("\n") if ln]
             return []
         except Exception:
             pass
