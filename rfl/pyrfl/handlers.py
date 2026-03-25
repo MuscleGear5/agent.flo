@@ -23,6 +23,7 @@ ruflo_run = _mcp_mod.ruflo_run
 
 ui = importlib.import_module(".ui", _pkg)
 _cmd_mod = importlib.import_module(".commands", _pkg)
+_suggest = importlib.import_module(".suggest", _pkg)
 COMMANDS = _cmd_mod.COMMANDS
 
 from rich.prompt import Prompt, Confirm  # noqa: E402
@@ -78,6 +79,9 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
 
     # Breadcrumb header
     ui.breadcrumb("pyrfl", cmd, sub)
+
+    # Fire AI suggestions in background (fetches while command runs)
+    _suggest.fire_background(cmd, sub)
 
     # 1. Check for custom handler first
     custom = CUSTOM_HANDLERS.get(handler_key)
@@ -592,54 +596,98 @@ def _agent_followups(sub: str, result: dict | None, depth: int = 0):
     run_command(target_cmd, target_sub, args=prefill if prefill else None)
 
 
+_SWARM_AGENT_TYPES = [
+    "coder", "researcher", "tester", "reviewer", "architect",
+    "coordinator", "analyst", "optimizer", "security-architect",
+    "security-auditor", "memory-specialist", "swarm-specialist",
+    "performance-engineer", "core-architect", "test-architect",
+]
+
+# Sentinel label — handled specially in _swarm_followups, not via run_command.
+_SPAWN_AGENTS_LABEL = "spawn agents"
+
+
+def _swarm_batch_spawn(swarm_id: str):
+    """Multi-pick agent types and batch-spawn them into an existing swarm."""
+    selected = ui.multi_choose("Agent types to spawn", _SWARM_AGENT_TYPES)
+    if not selected:
+        return
+    tag = swarm_id.rsplit("-", 1)[-1] if "-" in swarm_id else swarm_id[:8]
+    spawned = 0
+    for atype in selected:
+        aid = f"swarm-{tag}-{atype}"
+        with ui.spin(f"Spawning {atype}..."):
+            r = mcp_exec("agent_spawn", {
+                "agentType": atype,
+                "agentId": aid,
+            })
+        if r.get("error"):
+            ui.error(f"{atype}: {r['error']}")
+        else:
+            ui.success(f"{aid} ({atype})")
+            spawned += 1
+    ui.console.print()
+    ui.success(f"{spawned}/{len(selected)} agents spawned into swarm")
+
+
 def _swarm_followup_actions(sub: str, result: dict) -> list[tuple[str, str, str, dict]]:
-    """Return (label, target_cmd, target_sub, prefill_args) for swarm commands."""
+    """Return (label, target_cmd, target_sub, prefill_args) for swarm commands.
+
+    _SPAWN_AGENTS_LABEL is intercepted by _swarm_followups and routed to
+    _swarm_batch_spawn instead of run_command.
+    """
     actions: list[tuple[str, str, str, dict]] = []
     swarm_id = result.get("swarmId", result.get("id", ""))
-    agent_count = result.get("agentCount", result.get("spawned", 0))
+    has_agents = bool(result.get("agentCount") or result.get("spawned")
+                      or result.get("agents"))
     swarm_status = (result.get("status") or "").lower()
+    sid = {"swarmId": swarm_id} if swarm_id else {}
 
     if sub == "init":
-        actions.append(("start swarm", "swarm", "start", {}))
-        actions.append(("coordinate task", "swarm", "coordinate", {}))
-        actions.append(("swarm status", "swarm", "status", {}))
+        # Just inited an empty swarm — need agents first.
+        actions.append((_SPAWN_AGENTS_LABEL, "", "", sid))
+        actions.append(("swarm status", "swarm", "status", sid))
 
     elif sub == "start":
-        actions.append(("coordinate task", "swarm", "coordinate", {}))
-        actions.append(("swarm status", "swarm", "status", {}))
-        actions.append(("scale", "swarm", "scale", {}))
+        # Wizard already spawned agents — now use them.
+        actions.append(("coordinate task", "swarm", "coordinate", sid))
+        actions.append(("swarm status", "swarm", "status", sid))
+        actions.append(("scale", "swarm", "scale", sid))
         if swarm_id:
-            actions.append(("stop swarm", "swarm", "stop", {"swarmId": swarm_id}))
+            actions.append(("stop swarm", "swarm", "stop", sid))
 
     elif sub == "status":
+        # Refresh is always useful.
+        actions.append(("refresh", "swarm", "status", sid))
         if swarm_status in ("running", "active"):
-            actions.append(("coordinate task", "swarm", "coordinate", {}))
-            actions.append(("scale", "swarm", "scale", {}))
-            actions.append(("create task", "task", "create", {}))
+            actions.append(("coordinate task", "swarm", "coordinate", sid))
+            actions.append(("scale", "swarm", "scale", sid))
+            if not has_agents:
+                actions.append((_SPAWN_AGENTS_LABEL, "", "", sid))
             if swarm_id:
-                actions.append(("stop swarm", "swarm", "stop", {"swarmId": swarm_id}))
+                actions.append(("stop swarm", "swarm", "stop", sid))
         elif swarm_status in ("idle", "initialized"):
-            actions.append(("start swarm", "swarm", "start", {}))
-            actions.append(("coordinate task", "swarm", "coordinate", {}))
+            actions.append((_SPAWN_AGENTS_LABEL, "", "", sid))
+            actions.append(("coordinate task", "swarm", "coordinate", sid))
         elif swarm_status in ("stopped", "terminated", "error"):
             actions.append(("init new swarm", "swarm", "init", {}))
         else:
-            actions.append(("coordinate task", "swarm", "coordinate", {}))
-            actions.append(("scale", "swarm", "scale", {}))
-            actions.append(("swarm status", "swarm", "status", {}))
+            # Unknown — safe options only.
+            actions.append(("coordinate task", "swarm", "coordinate", sid))
+            if swarm_id:
+                actions.append(("stop swarm", "swarm", "stop", sid))
 
     elif sub == "stop":
         actions.append(("init new swarm", "swarm", "init", {}))
-        actions.append(("start swarm", "swarm", "start", {}))
 
     elif sub == "scale":
-        actions.append(("swarm status", "swarm", "status", {}))
-        actions.append(("coordinate task", "swarm", "coordinate", {}))
+        actions.append(("swarm status", "swarm", "status", sid))
+        actions.append(("coordinate task", "swarm", "coordinate", sid))
 
     elif sub == "coordinate":
-        actions.append(("coordinate another", "swarm", "coordinate", {}))
-        actions.append(("swarm status", "swarm", "status", {}))
-        actions.append(("scale", "swarm", "scale", {}))
+        actions.append(("coordinate another", "swarm", "coordinate", sid))
+        actions.append(("swarm status", "swarm", "status", sid))
+        actions.append(("scale", "swarm", "scale", sid))
 
     return actions
 
@@ -661,18 +709,27 @@ def _swarm_followups(sub: str, result: dict | None, depth: int = 0):
         return
 
     idx = labels.index(sel)
-    _, target_cmd, target_sub, prefill = actions[idx]
+    label, target_cmd, target_sub, prefill = actions[idx]
+
+    if label == _SPAWN_AGENTS_LABEL:
+        swarm_id = prefill.get("swarmId", "")
+        if swarm_id:
+            _swarm_batch_spawn(swarm_id)
+        else:
+            ui.error("No swarm ID — spawn agents manually: rfl agent spawn")
+        return
+
     run_command(target_cmd, target_sub, args=prefill if prefill else None)
 
 
 def _maybe_followup(cmd: str, sub: str, result: dict | None, depth: int = 0):
-    """Dispatch to dynamic followups for agent/swarm, otherwise static hints."""
+    """Dispatch to dynamic followups for agent/swarm, then AI suggestions."""
     if cmd == "agent":
         _agent_followups(sub, result, depth)
     elif cmd == "swarm":
         _swarm_followups(sub, result, depth)
-    else:
-        ui.footer_hints(cmd, sub)
+    # AI suggestions for all commands (fired in background by run_command)
+    _suggest.show_suggestions(cmd, sub)
 
 
 # ---------------------------------------------------------------------------
@@ -776,6 +833,61 @@ def _handle_swarm_start(args: dict) -> dict | None:
     ui.console.print()
     ui.success(f"Swarm ready: {spawned}/{agent_count} agents deployed")
     return {"swarmId": swarm_id, "spawned": spawned, "taskId": tid, "_sub": "start"}
+
+
+def _handle_swarm_coordinate(args: dict) -> dict | None:
+    """Coordinate a task across the swarm — pick existing or create new."""
+    _NEW_TASK = "+ create new task"
+    STRATEGIES = ["parallel", "sequential", "pipeline", "broadcast"]
+
+    # 1. Pick or create a task
+    task_desc = args.get("task")
+    if not task_desc:
+        result = mcp_exec("task_list")
+        tasks = result.get("tasks", [])
+        choices: list[str] = []
+        for t in tasks:
+            tid = t.get("taskId", t.get("id", "?"))
+            status = t.get("status", "?")
+            desc = str(t.get("description", ""))[:40]
+            choices.append(f"{tid}  [{status}]  {desc}")
+        choices.append(_NEW_TASK)
+        sel = ui.choose("Task to coordinate", choices)
+        if not sel:
+            return None
+        if sel == _NEW_TASK:
+            task_desc = Prompt.ask("Task description")
+            if not task_desc:
+                return None
+            with ui.spin("Creating task..."):
+                create_result = mcp_exec("task_create", {
+                    "type": "implementation",
+                    "description": task_desc,
+                })
+            tid = create_result.get("taskId", create_result.get("id", ""))
+            if tid:
+                ui.success(f"Task created: {tid}")
+        else:
+            task_desc = sel.split("]", 1)[-1].strip() if "]" in sel else sel
+
+    # 2. Pick strategy
+    strategy = args.get("strategy") or ui.choose("Strategy", STRATEGIES)
+    if not strategy:
+        strategy = "parallel"
+
+    # 3. Orchestrate
+    params: dict = {"task": task_desc, "strategy": strategy}
+    swarm_id = args.get("swarmId")
+    if swarm_id:
+        params["swarmId"] = swarm_id
+    with ui.spin(f"Coordinating ({strategy})..."):
+        result = mcp_exec("coordination_orchestrate", params)
+    if result.get("error"):
+        ui.error(result["error"])
+    else:
+        ui.success(f"Coordination started ({strategy})")
+        ui.show_kv("Coordination", result)
+    return result
 
 
 # ── Agent ──────────────────────────────────────────────────────────────────
@@ -1785,6 +1897,7 @@ CUSTOM_HANDLERS: dict[str, Callable[..., dict | None]] = {
     # Swarm
     "swarm_init":              _handle_swarm_init,
     "swarm_start":             _handle_swarm_start,
+    "swarm_coordinate":        _handle_swarm_coordinate,
     # Agent
     "agent_spawn":             _handle_agent_spawn,
     "agent_status":            _handle_agent_status,
