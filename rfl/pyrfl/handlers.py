@@ -265,6 +265,63 @@ def _pick_agents_multi(label: str = "Select agents") -> list[str]:
     return [s.split()[0] for s in selected]
 
 
+def _pick_memory_key(label: str = "Select key", namespace: str = "") -> str | None:
+    """Fetch memory keys via MCP, present picker, return selected key."""
+    params: dict = {"limit": 50}
+    if namespace:
+        params["namespace"] = namespace
+    result = mcp_exec("memory_list", params)
+    entries = result.get("entries", result.get("items", []))
+    if not entries:
+        ui.warn("No memory entries found")
+        return None
+    choices: list[str] = []
+    for e in entries:
+        key = e.get("key", "?")
+        ns = e.get("namespace", "default")
+        val = str(e.get("value", ""))[:30]
+        choices.append(f"{key}  [{ns}]  {val}")
+    sel = ui.choose(label, choices)
+    if not sel:
+        return None
+    return sel.split()[0]
+
+
+def _pick_model(label: str = "Select model") -> str | None:
+    """Fetch neural model list via MCP, present picker, return model ID."""
+    result = mcp_exec("neural_list")
+    models = result.get("models", [])
+    if not models:
+        ui.warn("No models found")
+        return None
+    choices: list[str] = []
+    for m in models:
+        mid = m.get("modelId", m.get("id", "?"))
+        mtype = m.get("type", "?")
+        status = m.get("status", "?")
+        acc = m.get("accuracy", "")
+        acc_str = f"  acc={acc:.2f}" if isinstance(acc, (int, float)) else ""
+        choices.append(f"{mid}  [{mtype}]  {status}{acc_str}")
+    sel = ui.choose(label, choices)
+    if not sel:
+        return None
+    return sel.split()[0]
+
+
+def _pick_config_key(label: str = "Select config key") -> str | None:
+    """Present picker for common config keys."""
+    keys = [
+        "topology", "maxAgents", "strategy", "consensus",
+        "memory.backend", "memory.path", "memory.hnsw",
+        "neural.enabled", "neural.sonaMode", "neural.flashAttention",
+        "logLevel", "mcp.transport", "mcp.port",
+        "security.validateInput", "security.sanitizePaths",
+        "hooks.enabled", "hooks.autolearn",
+    ]
+    sel = ui.choose(label, keys)
+    return sel if sel else None
+
+
 # ---------------------------------------------------------------------------
 # Auto-display
 # ---------------------------------------------------------------------------
@@ -685,6 +742,112 @@ def _handle_memory_search(args: dict):
     with ui.spin("Searching..."):
         result = mcp_exec("memory_search", params)
     _auto_display("memory", "search", result)
+
+
+def _handle_memory_retrieve(args: dict):
+    """Memory retrieve with dynamic key picker."""
+    ns = args.get("namespace", "")
+    key = args.get("key") or _pick_memory_key("Retrieve key", namespace=ns)
+    if not key:
+        return
+    with ui.spin(f"Retrieving {key}..."):
+        result = mcp_exec("memory_retrieve", {"key": key})
+    _auto_display("memory", "retrieve", result)
+
+
+def _handle_memory_delete(args: dict):
+    """Memory delete with dynamic key picker + confirm."""
+    ns = args.get("namespace", "")
+    key = args.get("key") or _pick_memory_key("Delete key", namespace=ns)
+    if not key:
+        return
+    if not Confirm.ask(f"Delete memory key '{key}'?", default=False):
+        return
+    with ui.spin(f"Deleting {key}..."):
+        result = mcp_exec("memory_delete", {"key": key})
+    if result.get("success"):
+        ui.success(f"Deleted: {key}")
+    else:
+        ui.error(result.get("error", f"Failed to delete {key}"))
+
+
+# ── Session (additional) ──────────────────────────────────────────────────
+
+def _handle_session_save(args: dict):
+    """Session save with picker."""
+    sid = args.get("sessionId") or _pick_session("Save session")
+    if not sid:
+        return
+    with ui.spin(f"Saving session {sid}..."):
+        result = mcp_exec("session_save", {"sessionId": sid})
+    if result.get("success"):
+        ui.success(f"Session {sid} saved")
+    else:
+        ui.error(result.get("error", f"Failed to save {sid}"))
+
+
+def _handle_session_import(args: dict):
+    """Session import with picker."""
+    sid = args.get("sessionId") or _pick_session("Import session")
+    if not sid:
+        return
+    with ui.spin(f"Importing session {sid}..."):
+        result = mcp_exec("session_restore", {"sessionId": sid})
+    if result.get("success"):
+        ui.success(f"Session {sid} imported")
+    else:
+        ui.error(result.get("error", f"Failed to import {sid}"))
+
+
+# ── Neural (additional) ──────────────────────────────────────────────────
+
+def _handle_neural_predict(args: dict):
+    """Neural predict with model picker."""
+    model = args.get("model") or _pick_model("Model for prediction")
+    if not model:
+        return
+    inp = args.get("input") or Prompt.ask("Input text")
+    if not inp:
+        return
+    with ui.spin(f"Predicting with {model}..."):
+        result = mcp_exec("neural_predict", {"input": inp, "model": model})
+    _auto_display("neural", "predict", result)
+
+
+def _handle_neural_optimize(args: dict):
+    """Neural optimize with model picker."""
+    model = args.get("model") or _pick_model("Optimize model")
+    if not model:
+        return
+    with ui.spin(f"Optimizing {model}..."):
+        result = mcp_exec("neural_optimize", {"model": model})
+    _auto_display("neural", "optimize", result)
+
+
+def _handle_neural_export(args: dict):
+    """Neural export with model picker."""
+    model = args.get("model") or _pick_model("Export model")
+    if not model:
+        return
+    path = args.get("path") or Prompt.ask("Export path", default=f"./{model}.json")
+    with ui.spin(f"Exporting {model}..."):
+        result = mcp_exec("neural_export", {"modelId": model, "path": path})
+    if result.get("success") or result.get("modelId"):
+        ui.success(f"Exported: {model} → {path}")
+    else:
+        ui.error(result.get("error", "Export failed"))
+
+
+# ── Config (additional) ──────────────────────────────────────────────────
+
+def _handle_config_get(args: dict):
+    """Config get with key picker."""
+    key = args.get("key") or _pick_config_key("Get config key")
+    if not key:
+        return
+    with ui.spin(f"Getting {key}..."):
+        result = mcp_exec("config_get", {"key": key})
+    _auto_display("config", "get", result)
 
 
 # ── Hive-Mind ──────────────────────────────────────────────────────────────
@@ -1250,9 +1413,13 @@ CUSTOM_HANDLERS: dict[str, Callable[..., None]] = {
     "session_restore":         _handle_session_restore,
     "session_delete":          _handle_session_delete,
     "session_export":          _handle_session_export,
+    "session_save":            _handle_session_save,
+    "session_import":          _handle_session_import,
     # Memory
     "memory_store":            _handle_memory_store,
     "memory_search":           _handle_memory_search,
+    "memory_retrieve":         _handle_memory_retrieve,
+    "memory_delete":           _handle_memory_delete,
     # Hive-mind
     "hive-mind_init":          _handle_hive_mind_init,
     "hive-mind_start":         _handle_hive_mind_init,
@@ -1268,12 +1435,16 @@ CUSTOM_HANDLERS: dict[str, Callable[..., None]] = {
     "hive-mind_shutdown":      _handle_hive_mind_shutdown,
     # Neural
     "neural_train":            _handle_neural_train,
+    "neural_predict":          _handle_neural_predict,
+    "neural_optimize":         _handle_neural_optimize,
+    "neural_export":           _handle_neural_export,
     # Security — handled by CLI passthrough, but keep audit as custom
     # "security_scan" and "security_audit" routed via _CLI_PASSTHROUGH
     # Embeddings
     "embeddings_compare":      _handle_embeddings_compare,
     # Config
     "config_set":              _handle_config_set,
+    "config_get":              _handle_config_get,
     # Hooks
     "hooks_route":             _handle_hooks_route,
     "hooks_coverage-route":    _handle_hooks_route,
