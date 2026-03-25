@@ -13,6 +13,7 @@ from typing import Any
 _pkg = __name__.rsplit(".", 1)[0]
 ui = importlib.import_module(".ui", _pkg)
 commands = importlib.import_module(".commands", _pkg)
+suggest = importlib.import_module(".suggest", _pkg)
 
 console = ui.console
 COMMANDS = commands.COMMANDS
@@ -151,21 +152,32 @@ def _fzf_main_loop(pdir: str) -> None:
 
     while True:
         fzf_input = "\n".join(unified)
+        suggest_tag = "ON" if suggest.is_enabled() else "OFF"
         result = _run_fzf(
             fzf_input,
             query=main_query,
             prompt="pyrfl > ",
-            border_label=" pyrfl  ruflo orchestration ",
+            border_label=" pyrfl > commands ",
             preview=f"'{pdir}/unified_preview.sh' {{}} '{pdir}'",
-            header="  type to search  │  ↑↓ navigate  │  enter select  │  esc quit",
+            header=f"  type to search  │  ↑↓ navigate  │  enter select  │  ctrl-s suggestions {suggest_tag}  │  esc quit",
             height="90%",
+            expect=["ctrl-s"],
         )
 
         if result is None:
             break
 
+        # ctrl-s toggle
+        if result.get("key") == "ctrl-s":
+            enabled = suggest.toggle()
+            console.print(f"[{'green' if enabled else 'red'}]  AI suggestions {'ON' if enabled else 'OFF'}[/]")
+            main_query = result.get("query", "")
+            continue
+
         main_query = result["query"]
-        selected = result["selected"]
+        selected = result.get("selected", "")
+        if not selected:
+            continue
 
         if "[+]" in selected:
             # Category selected — extract name between [+] and first double-space
@@ -203,22 +215,32 @@ def _fzf_category(pdir: str, cat_name: str) -> None:
 
     while True:
         fzf_input = "\n".join(entries)
+        suggest_tag = "ON" if suggest.is_enabled() else "OFF"
         result = _run_fzf(
             fzf_input,
             query=cat_query,
             prompt=f"  {cat_name} > ",
-            border_label=f" {cat_name} ",
+            border_label=f" pyrfl > {cat_name} ",
             preview=f"'{pdir}/cmd_preview.sh' {{1}} {{2}}",
             preview_label=" Help ",
-            header="  type to search  │  ↑↓ navigate  │  enter select  │  esc back",
+            header=f"  type to search  │  ↑↓ navigate  │  enter select  │  ctrl-s suggestions {suggest_tag}  │  esc back",
             height="80%",
+            expect=["ctrl-s"],
         )
 
         if result is None:
             break
 
+        if result.get("key") == "ctrl-s":
+            enabled = suggest.toggle()
+            console.print(f"[{'green' if enabled else 'red'}]  AI suggestions {'ON' if enabled else 'OFF'}[/]")
+            cat_query = result.get("query", "")
+            continue
+
         cat_query = result["query"]
-        selected = result["selected"]
+        selected = result.get("selected", "")
+        if not selected:
+            continue
         parts = selected.split()
         if len(parts) >= 2:
             cmd, sub = parts[0], parts[1]
@@ -236,7 +258,7 @@ def _fzf_action(cmd: str, sub: str) -> str | None:
     try:
         proc = subprocess.run(
             ["fzf", "--no-sort", "--height=6", "--border=bold",
-             f"--border-label= {cmd} {sub} ",
+             f"--border-label= pyrfl > {cmd} > {sub} ",
              "--border-label-pos=3",
              f"--color={_FZF_COLORS}",
              "--pointer=>", "--no-info"],
@@ -301,8 +323,14 @@ def _run_fzf(
     preview_label: str = " Preview ",
     header: str = "",
     height: str = "90%",
+    extra_binds: list[str] | None = None,
+    expect: list[str] | None = None,
 ) -> dict | None:
-    """Run fzf with standard pyrfl styling. Returns {query, selected} or None."""
+    """Run fzf with standard pyrfl styling.
+
+    Returns {query, selected} or {query, selected, key} when expect is set.
+    Returns None on esc/cancel.
+    """
     cmd = [
         "fzf",
         "--print-query",
@@ -324,14 +352,29 @@ def _run_fzf(
         "--pointer=>",
         "--marker=*",
     ]
+    if expect:
+        cmd.append(f"--expect={','.join(expect)}")
+    if extra_binds:
+        for b in extra_binds:
+            cmd.append(f"--bind={b}")
 
     try:
         proc = subprocess.run(
             cmd, input=input_text, capture_output=True, text=True,
         )
-        if proc.returncode != 0:
+        if proc.returncode not in (0, 1):
+            # 130 = esc, 2 = error
             return None
         lines = proc.stdout.strip().split("\n")
+        if expect:
+            # --print-query + --expect: line0=query, line1=key, line2=selected
+            return {
+                "query": lines[0] if lines else "",
+                "key": lines[1] if len(lines) > 1 else "",
+                "selected": lines[2] if len(lines) > 2 else "",
+            }
+        if proc.returncode != 0:
+            return None
         return {
             "query": lines[0] if lines else "",
             "selected": lines[1] if len(lines) > 1 else "",

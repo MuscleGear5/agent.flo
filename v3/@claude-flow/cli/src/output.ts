@@ -583,9 +583,11 @@ export class Spinner {
   private frames: string[];
   private interval: ReturnType<typeof setInterval> | null = null;
   private frameIndex: number = 0;
+  private startTime: number = 0;
+  private static readonly BAR_WIDTH = 30;
 
   private static readonly SPINNERS: Record<string, string[]> = {
-    dots: ['...', '..:' , '.::', ':::',  '::.', ':..' ,],
+    dots: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
     line: ['-', '\\', '|', '/'],
     arc: ['◜', '◠', '◝', '◞', '◡', '◟'],
     circle: ['◐', '◓', '◑', '◒'],
@@ -600,11 +602,12 @@ export class Spinner {
 
   start(): void {
     if (this.interval) return;
+    this.startTime = Date.now();
 
     this.interval = setInterval(() => {
       this.render();
       this.frameIndex = (this.frameIndex + 1) % this.frames.length;
-    }, 100);
+    }, 80);
     this.interval.unref();
 
     this.render();
@@ -617,7 +620,7 @@ export class Spinner {
     }
 
     // Clear the line
-    process.stdout.write('\r' + ' '.repeat(this.text.length + 10) + '\r');
+    process.stdout.write('\r' + ' '.repeat(this.text.length + Spinner.BAR_WIDTH + 30) + '\r');
 
     if (message) {
       this.formatter.writeln(message);
@@ -632,9 +635,36 @@ export class Spinner {
     this.stop(this.formatter.error(message ?? this.text));
   }
 
+  /** Sine-wave pulse bar: [####------####--------------] */
+  private hashBar(): string {
+    const w = Spinner.BAR_WIDTH;
+    const elapsed = (Date.now() - this.startTime) / 1000;
+    const t = Math.sin(elapsed * 1.8) * 0.5 + 0.5;
+    const center = Math.floor(t * (w - 1));
+    const pulseW = Math.max(3, Math.floor(w * 0.25));
+
+    let bar = '[';
+    for (let i = 0; i < w; i++) {
+      const dist = Math.abs(i - center);
+      bar += dist < pulseW ? this.formatter.color('#', 'green') : this.formatter.dim('-');
+    }
+    bar += ']';
+    return bar;
+  }
+
+  /** Format elapsed time as m:ss */
+  private elapsed(): string {
+    const sec = Math.floor((Date.now() - this.startTime) / 1000);
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return this.formatter.dim(`${m}:${s.toString().padStart(2, '0')}`);
+  }
+
   private render(): void {
-    const frame = this.formatter.info(this.frames[this.frameIndex]);
-    process.stdout.write(`\r${frame} ${this.text}`);
+    const frame = this.formatter.color(this.frames[this.frameIndex], 'green');
+    const bar = this.hashBar();
+    const time = this.elapsed();
+    process.stdout.write(`\r${frame} ${this.text} ${bar} ${time}`);
   }
 
   setText(text: string): void {

@@ -481,6 +481,18 @@ COMMANDS: dict[str, dict] = {
             "update":  {"desc": "Update an appliance",         "tool": "system_info"},
         },
     },
+    # ── Tutor ────────────────────────────────────────────────────
+    "tutor": {
+        "desc": "Interactive learning and command reference",
+        "subs": {
+            "ask":      {"desc": "Ask a question about ruflo",     "tool": "_tutor", "params": ["question"]},
+            "explain":  {"desc": "Explain a specific command",     "tool": "_tutor", "params": ["command", "subcommand"]},
+            "browse":   {"desc": "Interactive browse & learn",     "tool": "_tutor"},
+            "scan":     {"desc": "Discover commands, agents, skills", "tool": "_tutor"},
+            "quiz":     {"desc": "Test your knowledge",           "tool": "_tutor"},
+            "build":    {"desc": "Build a command interactively",  "tool": "_tutor", "params": ["command", "subcommand"]},
+        },
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -491,7 +503,7 @@ CATEGORIES: dict[str, dict] = {
     "Primary": {
         "desc": "Core commands for everyday use",
         "commands": ["init", "start", "status", "agent", "swarm", "memory",
-                     "task", "session", "mcp", "hooks"],
+                     "task", "session", "mcp", "hooks", "tutor"],
     },
     "Advanced": {
         "desc": "Neural, security, performance, embeddings, hive-mind, RuVector, governance",

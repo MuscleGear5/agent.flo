@@ -12,7 +12,6 @@ import {
   suggestReviewers,
   getGitDiffNumstat,
   type DiffFile,
-  type RiskLevel,
 } from '../ruvector/diff-classifier.js';
 
 /**
@@ -256,8 +255,15 @@ export const fileRiskTool: MCPTool = {
     required: ['path'],
   },
   handler: async (params: Record<string, unknown>) => {
+    if (!params.path || typeof params.path !== 'string') {
+      return {
+        error: true,
+        message: 'Missing required parameter: path',
+      };
+    }
+
     const file: DiffFile = {
-      path: params.path as string,
+      path: params.path,
       status: (params.status as DiffFile['status']) || 'modified',
       additions: (params.additions as number) || 0,
       deletions: (params.deletions as number) || 0,
