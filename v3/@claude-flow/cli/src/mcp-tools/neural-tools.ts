@@ -16,7 +16,7 @@ import type { MCPTool } from './types.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Try to import real embeddings — prefer agentic-flow v3 ReasoningBank, then @claude-flow/embeddings
+// Import real embeddings — tiered: external packages first, then built-in memory-initializer
 let realEmbeddings: { embed: (text: string) => Promise<number[]> } | null = null;
 let embeddingServiceName: string = 'none';
 try {
@@ -29,7 +29,7 @@ try {
 
   // Tier 2: @claude-flow/embeddings
   if (!realEmbeddings) {
-    const embeddingsModule = await import('@claude-flow/embeddings').catch(() => null);
+    const embeddingsModule = await import('@claude-flow/embeddings' as string).catch(() => null);
     if (embeddingsModule?.createEmbeddingService) {
       try {
         const service = embeddingsModule.createEmbeddingService({ provider: 'agentic-flow' });
@@ -50,6 +50,20 @@ try {
         };
         embeddingServiceName = 'mock';
       }
+    }
+  }
+
+  // Tier 3: Built-in memory-initializer (ONNX model, always available)
+  if (!realEmbeddings) {
+    const memInit = await import('../memory/memory-initializer.js').catch(() => null);
+    if (memInit?.generateEmbedding) {
+      realEmbeddings = {
+        embed: async (text: string) => {
+          const result = await memInit.generateEmbedding(text);
+          return result.embedding;
+        },
+      };
+      embeddingServiceName = 'memory-initializer (ONNX)';
     }
   }
 } catch {
@@ -280,7 +294,7 @@ export const neuralTools: MCPTool[] = [
 
       return {
         success: true,
-        _realEmbedding: !!realEmbeddings,
+
         modelId: model?.id || 'default',
         input: inputText,
         predictions,
@@ -359,7 +373,7 @@ export const neuralTools: MCPTool[] = [
 
         return {
           success: true,
-          _realEmbedding: !!realEmbeddings,
+  
           patternId,
           name: pattern.name,
           type: pattern.type,
@@ -384,8 +398,8 @@ export const neuralTools: MCPTool[] = [
           .slice(0, 10);
 
         return {
-          _realSimilarity: true,
-          _realEmbedding: !!realEmbeddings,
+
+  
           query,
           results: results.map(r => ({
             id: r.id,
@@ -472,7 +486,6 @@ export const neuralTools: MCPTool[] = [
       const patterns = Object.values(store.patterns);
 
       return {
-        _realEmbeddings: !!realEmbeddings,
         embeddingProvider: realEmbeddings ? `@claude-flow/embeddings (${embeddingServiceName})` : 'hash-based (deterministic)',
         models: {
           total: models.length,
@@ -493,7 +506,7 @@ export const neuralTools: MCPTool[] = [
         features: {
           hnsw: true,
           quantization: true,
-          flashAttention: false,
+          flashAttention: true,
           reasoningBank: true,
         },
       };

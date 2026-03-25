@@ -928,6 +928,186 @@ async function handleStatus(sub: string, args: string[]): Promise<CommandResult>
 }
 
 // ---------------------------------------------------------------------------
+// Hive-Mind
+// ---------------------------------------------------------------------------
+
+async function handleHiveMind(sub: string, args: string[]): Promise<CommandResult> {
+  const { positional, flags } = parseArgs(args);
+  switch (sub) {
+    case 'init': {
+      const topo = (flags.topology ?? positional[0] ?? 'hierarchical-mesh') as string;
+      const data = await tool('hive-mind_init', { topology: topo });
+      return (data as KV).success ? ok(`Hive-mind initialized (topology: ${topo})`) : fail('Hive init failed');
+    }
+    case 'spawn': {
+      const atype = (flags.type ?? flags.t ?? positional[0]) as string;
+      if (!atype) return fail('No agent type');
+      const aid = `hive-${atype}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const spawnData = await tool('agent_spawn', { agentType: atype, agentId: aid });
+      if (!(spawnData as KV).success && !(spawnData as KV).agentId) return fail(`${atype} spawn failed`);
+      await tool('hive-mind_join', { agentId: aid }).catch(() => {});
+      await tool('coordination_node', { nodeId: aid, role: 'worker', capabilities: [atype] }).catch(() => {});
+      return ok(`${aid} (${atype}) joined hive`);
+    }
+    case 'status': {
+      const [hm, pool] = await Promise.all([
+        tool('hive-mind_status').catch(() => ({})),
+        tool('agent_list').catch(() => ({ agents: [] })),
+      ]);
+      const agents = ((pool as KV).agents ?? []) as KV[];
+      const hmData = hm as KV;
+      if (Object.keys(hmData).length > 1) {
+        const rows: Record<string, unknown>[] = [];
+        for (const [key, label] of [['swarmId', 'Hive'], ['status', 'Status'], ['topology', 'Topology'], ['agentCount', 'Agents']] as const) {
+          const v = hmData[key];
+          if (v !== undefined && v !== '') rows.push({ field: label, value: sc(String(v)) });
+        }
+        if (rows.length) {
+          out.writeln('');
+          out.printTable({ columns: [{ key: 'field', header: 'Field' }, { key: 'value', header: 'Value' }], data: rows, border: true, header: true });
+        }
+      }
+      if (agents.length) {
+        out.writeln('');
+        out.printTable({
+          columns: [
+            { key: 'status', header: 'Status', format: (v: unknown) => sc(v) },
+            { key: 'type', header: 'Type' },
+            { key: 'id', header: 'ID' },
+          ],
+          data: agents.map(a => ({
+            status: a.status ?? '?',
+            type: a.agentType ?? a.type ?? '?',
+            id: a.agentId ?? a.id ?? '?',
+          })),
+          border: true, header: true,
+        });
+      } else {
+        out.writeln(out.dim('  (no agents)'));
+      }
+      out.writeln('');
+      return { success: true };
+    }
+    case 'task': {
+      const desc = (positional.join(' ') || flags.d || flags.description) as string;
+      if (!desc) return fail('No task description');
+      const taskData = await tool('task_create', { type: 'feature', description: desc, priority: 'high' });
+      const tid = (taskData as KV).taskId ?? (taskData as KV).id;
+      if (!tid) return fail('Task creation failed');
+      out.printSuccess(`Task: ${tid}`);
+      try {
+        const agentData = await tool('agent_list');
+        const allAgents = ((agentData as KV).agents ?? []) as KV[];
+        const idle = allAgents.find(a => ['idle', 'active'].includes(String(a.status)));
+        if (idle) {
+          const aid = idle.agentId ?? idle.id;
+          await tool('task_assign', { taskId: tid, agentIds: [aid] });
+          out.writeln(out.dim(`  Assigned to: ${aid}`));
+        }
+      } catch { /* auto-assign best-effort */ }
+      await tool('hive-mind_broadcast', { message: `task: ${desc}`, taskId: tid, type: 'task' }).catch(() => {});
+      out.writeln(out.dim('  Broadcast to hive'));
+      try {
+        const orchData = await tool('coordination_orchestrate', { taskId: tid, strategy: 'auto', description: desc });
+        out.writeln(out.dim(`  Orchestration: ${(orchData as KV).success ? 'started' : 'queued'}`));
+      } catch { /* best-effort */ }
+      out.writeln('');
+      out.writeln(out.dim(`  ${desc}`));
+      return { success: true };
+    }
+    case 'join': {
+      const ids = (positional.join(',') || String(flags.ids ?? '')).split(',').filter(Boolean);
+      if (!ids.length) return fail('No agent IDs');
+      let joined = 0;
+      for (const aid of ids) {
+        try {
+          const data = await tool('hive-mind_join', { agentId: aid.trim() });
+          if ((data as KV).success) {
+            await tool('coordination_node', { nodeId: aid.trim(), role: 'worker' }).catch(() => {});
+            out.writeln(`  ${out.success('[+]')} ${aid.trim()} joined hive`);
+            joined++;
+          } else {
+            out.writeln(`  ${out.error('[x]')} ${aid.trim()} join failed`);
+          }
+        } catch { out.writeln(`  ${out.error('[x]')} ${aid.trim()} join failed`); }
+      }
+      if (joined > 0) {
+        await tool('coordination_sync', { action: 'sync' }).catch(() => {});
+        return ok(`${joined} agent(s) joined hive`);
+      }
+      return fail('No agents joined');
+    }
+    case 'leave': {
+      const ids = (positional.join(',') || String(flags.ids ?? '')).split(',').filter(Boolean);
+      if (!ids.length) return fail('No agent IDs');
+      let left = 0;
+      for (const aid of ids) {
+        try {
+          const data = await tool('hive-mind_leave', { agentId: aid.trim() });
+          if ((data as KV).success) {
+            out.writeln(`  ${out.success('[-]')} ${aid.trim()} left hive`);
+            left++;
+          } else {
+            out.writeln(`  ${out.error('[x]')} ${aid.trim()} leave failed`);
+          }
+        } catch { out.writeln(`  ${out.error('[x]')} ${aid.trim()} leave failed`); }
+      }
+      return left > 0 ? ok(`${left} agent(s) left hive`) : fail('No agents left');
+    }
+    case 'consensus': {
+      const topic = (positional.join(' ') || flags.topic) as string;
+      if (!topic) return fail('No topic');
+      const data = await tool('hive-mind_consensus', { topic });
+      kvTable(data as KV, 'Consensus');
+      return { success: true };
+    }
+    case 'broadcast': {
+      const msg = (positional.join(' ') || flags.message || flags.m) as string;
+      if (!msg) return fail('No message');
+      const data = await tool('hive-mind_broadcast', { message: msg });
+      if (!(data as KV).success) return fail('Broadcast failed');
+      out.printSuccess('Broadcast sent to hive');
+      await tool('hive-mind_memory', { action: 'store', key: `broadcast-${Date.now()}`, value: msg }).catch(() => {});
+      await tool('coordination_sync', { action: 'broadcast', message: msg }).catch(() => {});
+      out.writeln(out.dim('  Stored in hive memory + coordination synced'));
+      out.writeln(out.dim(`  ${msg}`));
+      return { success: true };
+    }
+    case 'memory': {
+      out.writeln('');
+      out.writeln(out.bold('Hive Memory'));
+      const data = await tool('hive-mind_memory', { action: 'list' });
+      const d = data as KV;
+      const mems = (d.memories ?? d.items ?? d.entries ?? []) as KV[];
+      if (!mems.length) { out.writeln(out.dim('  (empty)')); }
+      else {
+        out.printTable({
+          columns: [{ key: 'key', header: 'Key' }, { key: 'value', header: 'Value', width: 80 }],
+          data: mems.map(m => {
+            if (typeof m === 'object' && m !== null) {
+              return { key: (m as KV).key ?? (m as KV).id ?? '?', value: sc(String((m as KV).value ?? (m as KV).content ?? '').slice(0, 80)) };
+            }
+            return { key: String(m), value: '' };
+          }),
+          border: true, header: true,
+        });
+      }
+      out.writeln('');
+      return { success: true };
+    }
+    case 'optimize-memory': {
+      const data = await tool('hive-mind_memory', { action: 'optimize' });
+      return (data as KV).success ? ok('Hive memory optimized') : fail('Optimize failed');
+    }
+    case 'shutdown': {
+      const data = await tool('hive-mind_shutdown');
+      return (data as KV).success ? ok('Hive-mind shut down') : fail('Shutdown failed');
+    }
+    default: return fail(`Unknown hive-mind sub: ${sub}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main dispatch
 // ---------------------------------------------------------------------------
 
@@ -944,6 +1124,7 @@ const DOMAINS: Record<string, (sub: string, args: string[]) => Promise<CommandRe
   hooks: handleHooks,
   progress: handleProgress,
   status: handleStatus,
+  'hive-mind': handleHiveMind,
 };
 
 export const tuiCommand: Command = {

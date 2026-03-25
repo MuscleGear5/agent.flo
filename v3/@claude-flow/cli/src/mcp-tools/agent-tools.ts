@@ -6,69 +6,13 @@
  * Includes model routing integration for intelligent model selection.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import type { MCPTool } from './types.js';
 import { getAgentProcessManager, type AgentModel } from '../services/agent-process-manager.js';
-
-// Storage paths
-const STORAGE_DIR = '.claude-flow';
-const AGENT_DIR = 'agents';
-const AGENT_FILE = 'store.json';
+import { StateDB } from '../state-db.js';
+import { AgentDAO } from '../dao/agent-dao.js';
 
 // Model types matching Claude Agent SDK
 type ClaudeModel = 'haiku' | 'sonnet' | 'opus' | 'inherit';
-
-interface AgentRecord {
-  agentId: string;
-  agentType: string;
-  status: 'idle' | 'busy' | 'terminated';
-  health: number;
-  taskCount: number;
-  config: Record<string, unknown>;
-  createdAt: string;
-  domain?: string;
-  model?: ClaudeModel;  // Model assigned to this agent
-  modelRoutedBy?: 'explicit' | 'router' | 'agent-booster' | 'default';  // How model was determined (ADR-026)
-}
-
-interface AgentStore {
-  agents: Record<string, AgentRecord>;
-  version: string;
-}
-
-function getAgentDir(): string {
-  return join(process.cwd(), STORAGE_DIR, AGENT_DIR);
-}
-
-function getAgentPath(): string {
-  return join(getAgentDir(), AGENT_FILE);
-}
-
-function ensureAgentDir(): void {
-  const dir = getAgentDir();
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-}
-
-function loadAgentStore(): AgentStore {
-  try {
-    const path = getAgentPath();
-    if (existsSync(path)) {
-      const data = readFileSync(path, 'utf-8');
-      return JSON.parse(data);
-    }
-  } catch {
-    // Return empty store on error
-  }
-  return { agents: {}, version: '3.0.0' };
-}
-
-function saveAgentStore(store: AgentStore): void {
-  ensureAgentDir();
-  writeFileSync(getAgentPath(), JSON.stringify(store, null, 2), 'utf-8');
-}
 
 // Default model mappings for agent types (can be overridden)
 const AGENT_TYPE_MODEL_DEFAULTS: Record<string, ClaudeModel> = {
@@ -198,7 +142,8 @@ export const agentTools: MCPTool[] = [
       required: ['agentType'],
     },
     handler: async (input) => {
-      const store = loadAgentStore();
+      const db = StateDB.getInstance();
+      const agents = new AgentDAO(db.database);
       const agentId = (input.agentId as string) || `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const agentType = input.agentType as string;
       const config = (input.config as Record<string, unknown>) || {};
@@ -218,21 +163,18 @@ export const agentTools: MCPTool[] = [
         task
       );
 
-      const agent: AgentRecord = {
-        agentId,
-        agentType,
+      const agent = agents.spawn({
+        id: agentId,
+        type: agentType,
         status: 'idle',
-        health: 1.0,
-        taskCount: 0,
-        config,
-        createdAt: new Date().toISOString(),
-        domain: input.domain as string,
         model: routingResult.model,
-        modelRoutedBy: routingResult.routedBy,
-      };
-
-      store.agents[agentId] = agent;
-      saveAgentStore(store);
+        metadata: {
+          ...config,
+          domain: input.domain as string,
+          modelRoutedBy: routingResult.routedBy,
+          health: 1.0,
+        },
+      });
 
       // Start a real process via AgentProcessManager
       let pid: number | null = null;
@@ -247,22 +189,24 @@ export const agentTools: MCPTool[] = [
         });
         pid = running.pid;
         processStatus = running.status;
-        // Update store with real PID
-        store.agents[agentId].status = processStatus === 'idle' ? 'idle' : 'busy';
-        saveAgentStore(store);
+        // Update agent with real process status
+        agents.update(agentId, {
+          status: processStatus === 'idle' ? 'idle' : 'busy',
+        });
       } catch (procError) {
         // Process spawn failed — agent record still exists but no process
         processStatus = 'spawn_failed';
-        (agent.config as Record<string, unknown>).processError = (procError as Error).message;
-        saveAgentStore(store);
+        agents.update(agentId, {
+          metadata: { ...agent.metadata, processError: (procError as Error).message },
+        });
       }
 
       // Include Agent Booster routing info if applicable
       const response: Record<string, unknown> = {
         success: true,
         agentId,
-        agentType: agent.agentType,
-        model: agent.model,
+        agentType,
+        model: routingResult.model,
         modelRoutedBy: routingResult.routedBy,
         status: processStatus,
         pid: pid || undefined,
@@ -295,13 +239,11 @@ export const agentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (input) => {
-      const store = loadAgentStore();
+      const db = StateDB.getInstance();
+      const agents = new AgentDAO(db.database);
       const agentId = input.agentId as string;
 
-      if (store.agents[agentId]) {
-        store.agents[agentId].status = 'terminated';
-        saveAgentStore(store);
-
+      if (agents.terminate(agentId)) {
         // Kill real process if running
         let processKilled = false;
         try {
@@ -339,11 +281,13 @@ export const agentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (input) => {
-      const store = loadAgentStore();
+      const db = StateDB.getInstance();
+      const agents = new AgentDAO(db.database);
       const agentId = input.agentId as string;
-      const agent = store.agents[agentId];
+      const agent = agents.get(agentId);
 
       if (agent) {
+        const health = (agent.metadata as Record<string, unknown>)?.health as number ?? 1.0;
         // Enrich with real process info
         let processInfo: Record<string, unknown> = {};
         try {
@@ -363,13 +307,13 @@ export const agentTools: MCPTool[] = [
         }
 
         return {
-          agentId: agent.agentId,
-          agentType: agent.agentType,
+          agentId: agent.id,
+          agentType: agent.type,
           status: agent.status,
-          health: agent.health,
+          health,
           taskCount: agent.taskCount,
           createdAt: agent.createdAt,
-          domain: agent.domain,
+          domain: (agent.metadata as Record<string, unknown>)?.domain,
           ...processInfo,
         };
       }
@@ -394,32 +338,31 @@ export const agentTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
-      const store = loadAgentStore();
-      let agents = Object.values(store.agents);
+      const db = StateDB.getInstance();
+      const dao = new AgentDAO(db.database);
+      let agentList = dao.list(!!input.includeTerminated);
 
       // Filter by status
       if (input.status) {
-        agents = agents.filter(a => a.status === input.status);
-      } else if (!input.includeTerminated) {
-        agents = agents.filter(a => a.status !== 'terminated');
+        agentList = agentList.filter(a => a.status === input.status);
       }
 
       // Filter by domain
       if (input.domain) {
-        agents = agents.filter(a => a.domain === input.domain);
+        agentList = agentList.filter(a => (a.metadata as Record<string, unknown>)?.domain === input.domain);
       }
 
       return {
-        agents: agents.map(a => ({
-          agentId: a.agentId,
-          agentType: a.agentType,
+        agents: agentList.map(a => ({
+          agentId: a.id,
+          agentType: a.type,
           status: a.status,
-          health: a.health,
+          health: (a.metadata as Record<string, unknown>)?.health ?? 1.0,
           taskCount: a.taskCount,
           createdAt: a.createdAt,
-          domain: a.domain,
+          domain: (a.metadata as Record<string, unknown>)?.domain,
         })),
-        total: agents.length,
+        total: agentList.length,
         filters: {
           status: input.status,
           domain: input.domain,
@@ -442,74 +385,65 @@ export const agentTools: MCPTool[] = [
       required: ['action'],
     },
     handler: async (input) => {
-      const store = loadAgentStore();
-      const agents = Object.values(store.agents).filter(a => a.status !== 'terminated');
-      const action = (input.action as string) || 'status';  // Default to status
+      const db = StateDB.getInstance();
+      const dao = new AgentDAO(db.database);
+      const agentList = dao.list(false);
+      const action = (input.action as string) || 'status';
 
       if (action === 'status') {
         const byType: Record<string, number> = {};
         const byStatus: Record<string, number> = {};
-        for (const agent of agents) {
-          byType[agent.agentType] = (byType[agent.agentType] || 0) + 1;
+        for (const agent of agentList) {
+          byType[agent.type] = (byType[agent.type] || 0) + 1;
           byStatus[agent.status] = (byStatus[agent.status] || 0) + 1;
         }
-        const busyAgents = agents.filter(a => a.status === 'busy').length;
-        const utilization = agents.length > 0 ? busyAgents / agents.length : 0;
+        const busyAgents = agentList.filter(a => a.status === 'busy').length;
+        const utilization = agentList.length > 0 ? busyAgents / agentList.length : 0;
+        const healthValues = agentList.map(a => (a.metadata as Record<string, unknown>)?.health as number ?? 1.0);
+        const avgHealth = healthValues.length > 0 ? healthValues.reduce((sum, h) => sum + h, 0) / healthValues.length : 0;
         return {
           action,
-          // CLI expected fields
           poolId: 'agent-pool-default',
-          currentSize: agents.length,
+          currentSize: agentList.length,
           minSize: (input.min as number) || 0,
           maxSize: (input.max as number) || 100,
           autoScale: (input.autoScale as boolean) ?? false,
           utilization,
-          agents: agents.map(a => ({
-            id: a.agentId,
-            type: a.agentType,
+          agents: agentList.map(a => ({
+            id: a.id,
+            type: a.type,
             status: a.status,
           })),
-          // Additional fields
           id: 'agent-pool-default',
-          size: agents.length,
-          totalAgents: agents.length,
+          size: agentList.length,
+          totalAgents: agentList.length,
           byType,
           byStatus,
-          avgHealth: agents.length > 0 ? agents.reduce((sum, a) => sum + a.health, 0) / agents.length : 0,
+          avgHealth,
         };
       }
 
       if (action === 'scale') {
         const targetSize = (input.targetSize as number) || 5;
         const agentType = (input.agentType as string) || 'worker';
-        const currentSize = agents.filter(a => a.agentType === agentType).length;
+        const currentSize = agentList.filter(a => a.type === agentType).length;
         const delta = targetSize - currentSize;
         const added: string[] = [];
         const removed: string[] = [];
 
         if (delta > 0) {
           for (let i = 0; i < delta; i++) {
-            const agentId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            store.agents[agentId] = {
-              agentId,
-              agentType,
-              status: 'idle',
-              health: 1.0,
-              taskCount: 0,
-              config: {},
-              createdAt: new Date().toISOString(),
-            };
-            added.push(agentId);
+            const spawned = dao.spawn({ type: agentType });
+            added.push(spawned.id);
           }
         } else if (delta < 0) {
-          const toRemove = agents.filter(a => a.agentType === agentType && a.status === 'idle').slice(0, -delta);
+          const toRemove = agentList.filter(a => a.type === agentType && a.status === 'idle').slice(0, -delta);
           for (const agent of toRemove) {
-            store.agents[agent.agentId].status = 'terminated';
-            removed.push(agent.agentId);
+            dao.terminate(agent.id);
+            removed.push(agent.id);
           }
         }
 
-        saveAgentStore(store);
         return {
           action,
           agentType,
@@ -524,20 +458,19 @@ export const agentTools: MCPTool[] = [
       if (action === 'drain') {
         const agentType = input.agentType as string;
         let drained = 0;
-        for (const agent of agents) {
-          if (!agentType || agent.agentType === agentType) {
+        for (const agent of agentList) {
+          if (!agentType || agent.type === agentType) {
             if (agent.status === 'idle') {
-              store.agents[agent.agentId].status = 'terminated';
+              dao.terminate(agent.id);
               drained++;
             }
           }
         }
-        saveAgentStore(store);
         return {
           action,
           agentType: agentType || 'all',
           drained,
-          remaining: agents.length - drained,
+          remaining: agentList.length - drained,
         };
       }
 
@@ -556,18 +489,22 @@ export const agentTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
-      const store = loadAgentStore();
-      const agents = Object.values(store.agents).filter(a => a.status !== 'terminated');
+      const db = StateDB.getInstance();
+      const dao = new AgentDAO(db.database);
+      const agentList = dao.list(false);
       const threshold = (input.threshold as number) || 0.5;
 
+      const getHealth = (a: typeof agentList[0]) => (a.metadata as Record<string, unknown>)?.health as number ?? 1.0;
+
       if (input.agentId) {
-        const agent = store.agents[input.agentId as string];
+        const agent = dao.get(input.agentId as string);
         if (agent) {
+          const health = getHealth(agent);
           return {
-            agentId: agent.agentId,
-            health: agent.health,
+            agentId: agent.id,
+            health,
             status: agent.status,
-            healthy: agent.health >= threshold,
+            healthy: health >= threshold,
             taskCount: agent.taskCount,
             uptime: Date.now() - new Date(agent.createdAt).getTime(),
           };
@@ -575,27 +512,27 @@ export const agentTools: MCPTool[] = [
         return { agentId: input.agentId, error: 'Agent not found' };
       }
 
-      const healthyAgents = agents.filter(a => a.health >= threshold);
-      const degradedAgents = agents.filter(a => a.health >= 0.3 && a.health < threshold);
-      const unhealthyAgents = agents.filter(a => a.health < 0.3);
-      const avgHealth = agents.length > 0 ? agents.reduce((sum, a) => sum + a.health, 0) / agents.length : 1;
-      const avgCpu = agents.length > 0 ? 35 + Math.random() * 30 : 0; // Simulated CPU
-      const avgMemory = avgHealth * 0.6; // Correlated with health
+      const healthyAgents = agentList.filter(a => getHealth(a) >= threshold);
+      const degradedAgents = agentList.filter(a => getHealth(a) >= 0.3 && getHealth(a) < threshold);
+      const unhealthyAgents = agentList.filter(a => getHealth(a) < 0.3);
+      const avgHealth = agentList.length > 0 ? agentList.reduce((sum, a) => sum + getHealth(a), 0) / agentList.length : 1;
+      const avgCpu = agentList.length > 0 ? 35 + Math.random() * 30 : 0;
+      const avgMemory = avgHealth * 0.6;
 
       return {
-        // CLI expected fields
-        agents: agents.map(a => {
+        agents: agentList.map(a => {
+          const h = getHealth(a);
           const uptime = Date.now() - new Date(a.createdAt).getTime();
           return {
-            id: a.agentId,
-            type: a.agentType,
-            health: a.health >= threshold ? 'healthy' : (a.health >= 0.3 ? 'degraded' : 'unhealthy'),
+            id: a.id,
+            type: a.type,
+            health: h >= threshold ? 'healthy' : (h >= 0.3 ? 'degraded' : 'unhealthy'),
             uptime,
-            memory: { used: Math.floor(256 * (1 - a.health * 0.3)), limit: 512 },
-            cpu: 20 + Math.floor(a.health * 40),
+            memory: { used: Math.floor(256 * (1 - h * 0.3)), limit: 512 },
+            cpu: 20 + Math.floor(h * 40),
             tasks: { active: a.taskCount > 0 ? 1 : 0, queued: 0, completed: a.taskCount, failed: 0 },
-            latency: { avg: 50 + Math.floor((1 - a.health) * 100), p99: 150 + Math.floor((1 - a.health) * 200) },
-            errors: { count: a.health < threshold ? 1 : 0 },
+            latency: { avg: 50 + Math.floor((1 - h) * 100), p99: 150 + Math.floor((1 - h) * 200) },
+            errors: { count: h < threshold ? 1 : 0 },
           };
         }),
         overall: {
@@ -607,15 +544,14 @@ export const agentTools: MCPTool[] = [
           score: Math.round(avgHealth * 100),
           issues: unhealthyAgents.length,
         },
-        // Additional fields
-        total: agents.length,
+        total: agentList.length,
         healthyCount: healthyAgents.length,
         unhealthyCount: unhealthyAgents.length,
         threshold,
         avgHealth,
         unhealthyAgents: unhealthyAgents.map(a => ({
-          agentId: a.agentId,
-          health: a.health,
+          agentId: a.id,
+          health: getHealth(a),
           status: a.status,
         })),
       };
@@ -637,28 +573,34 @@ export const agentTools: MCPTool[] = [
       required: ['agentId'],
     },
     handler: async (input) => {
-      const store = loadAgentStore();
+      const db = StateDB.getInstance();
+      const dao = new AgentDAO(db.database);
       const agentId = input.agentId as string;
-      const agent = store.agents[agentId];
+      const agent = dao.get(agentId);
 
       if (agent) {
-        if (input.status) agent.status = input.status as AgentRecord['status'];
-        if (typeof input.health === 'number') agent.health = input.health as number;
-        if (typeof input.taskCount === 'number') agent.taskCount = input.taskCount as number;
-        if (input.config) {
-          agent.config = { ...agent.config, ...(input.config as Record<string, unknown>) };
-        }
-        saveAgentStore(store);
+        const changes: Record<string, unknown> = {};
+        if (input.status) changes.status = input.status as string;
+        if (typeof input.taskCount === 'number') changes.taskCount = input.taskCount as number;
+
+        // Merge health and config into metadata
+        const meta = { ...(agent.metadata as Record<string, unknown>) };
+        if (typeof input.health === 'number') meta.health = input.health as number;
+        if (input.config) Object.assign(meta, input.config as Record<string, unknown>);
+        changes.metadata = meta;
+
+        dao.update(agentId, changes);
+        const updated = dao.get(agentId)!;
 
         return {
           success: true,
           agentId,
           updated: true,
           agent: {
-            agentId: agent.agentId,
-            status: agent.status,
-            health: agent.health,
-            taskCount: agent.taskCount,
+            agentId: updated.id,
+            status: updated.status,
+            health: (updated.metadata as Record<string, unknown>)?.health ?? 1.0,
+            taskCount: updated.taskCount,
           },
         };
       }

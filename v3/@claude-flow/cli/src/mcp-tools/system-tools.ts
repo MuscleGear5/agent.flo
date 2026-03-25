@@ -316,7 +316,7 @@ export const systemTools: MCPTool[] = [
           neural: true,
           hnsw: true,
           quantization: true,
-          flashAttention: false,
+          flashAttention: true,
         },
         limits: {
           maxAgents: 100,

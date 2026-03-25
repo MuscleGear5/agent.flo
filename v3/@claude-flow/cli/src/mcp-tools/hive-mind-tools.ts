@@ -2,16 +2,13 @@
  * Hive-Mind MCP Tools for CLI
  *
  * Tool definitions for collective intelligence and swarm coordination.
+ * Storage: StateDB (.ruflo/state.db) via HiveMindDAO + AgentDAO.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import type { MCPTool } from './types.js';
-
-// Storage paths
-const STORAGE_DIR = '.claude-flow';
-const HIVE_DIR = 'hive-mind';
-const HIVE_FILE = 'state.json';
+import { StateDB } from '../state-db.js';
+import { HiveMindDAO } from '../dao/hive-mind-dao.js';
+import { AgentDAO } from '../dao/agent-dao.js';
 
 interface HiveState {
   initialized: boolean;
@@ -150,30 +147,43 @@ function tryResolveProposal(
   return null;
 }
 
-function getHiveDir(): string {
-  return join(process.cwd(), STORAGE_DIR, HIVE_DIR);
+// ---------------------------------------------------------------------------
+// StateDB-backed storage (replaces JSON file I/O)
+// ---------------------------------------------------------------------------
+
+function getDAO(): HiveMindDAO {
+  return new HiveMindDAO(StateDB.getInstance().database);
 }
 
-function getHivePath(): string {
-  return join(getHiveDir(), HIVE_FILE);
+function getAgentDAO(): AgentDAO {
+  return new AgentDAO(StateDB.getInstance().database);
 }
 
-function ensureHiveDir(): void {
-  const dir = getHiveDir();
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-}
-
+/**
+ * Load hive state from StateDB, returning the same HiveState shape
+ * expected by all handlers below.
+ */
 function loadHiveState(): HiveState {
   try {
-    const path = getHivePath();
-    if (existsSync(path)) {
-      const data = readFileSync(path, 'utf-8');
-      return JSON.parse(data);
+    const record = getDAO().get('default');
+    if (record) {
+      const cs = record.consensusState as Record<string, unknown>;
+      return {
+        initialized: record.status === 'active',
+        topology: (cs.topology as HiveState['topology']) || 'mesh',
+        queen: cs.queen as HiveState['queen'],
+        workers: record.workers as string[],
+        consensus: {
+          pending: record.proposals as ConsensusProposal[],
+          history: (cs.history as ConsensusResult[]) || [],
+        },
+        sharedMemory: (cs.sharedMemory as Record<string, unknown>) || {},
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      };
     }
   } catch {
-    // Return default state on error
+    // Fall through to defaults
   }
   return {
     initialized: false,
@@ -186,31 +196,72 @@ function loadHiveState(): HiveState {
   };
 }
 
+/**
+ * Persist hive state back to StateDB.
+ */
 function saveHiveState(state: HiveState): void {
-  ensureHiveDir();
   state.updatedAt = new Date().toISOString();
-  writeFileSync(getHivePath(), JSON.stringify(state, null, 2), 'utf-8');
+  getDAO().save({
+    id: 'default',
+    queenId: state.queen?.agentId ?? null,
+    status: state.initialized ? 'active' : 'inactive',
+    workers: state.workers,
+    consensusState: {
+      topology: state.topology,
+      queen: state.queen,
+      history: state.consensus.history,
+      sharedMemory: state.sharedMemory,
+    },
+    proposals: state.consensus.pending,
+    broadcastLog: [],
+  });
 }
 
-// Import agent store helpers for spawn functionality
-import { existsSync as agentStoreExists, readFileSync as readAgentStore, writeFileSync as writeAgentStore, mkdirSync as mkdirAgentStore } from 'node:fs';
-
+/**
+ * Load agent store via AgentDAO.
+ * Fixes bug: old code used `.claude-flow/agents.json` (wrong path).
+ */
 function loadAgentStore(): { agents: Record<string, unknown> } {
-  const storePath = join(process.cwd(), '.claude-flow', 'agents.json');
-  try {
-    if (agentStoreExists(storePath)) {
-      return JSON.parse(readAgentStore(storePath, 'utf-8'));
-    }
-  } catch { /* ignore */ }
-  return { agents: {} };
+  const dao = getAgentDAO();
+  const agents = dao.list(true); // include terminated
+  const map: Record<string, unknown> = {};
+  for (const a of agents) {
+    map[a.id] = a;
+  }
+  return { agents: map };
 }
 
+/**
+ * Save agent store — for hive-mind spawn/shutdown which bulk-create/delete agents.
+ * Iterates the record set and upserts each agent via the DAO.
+ */
 function saveAgentStore(store: { agents: Record<string, unknown> }): void {
-  const storeDir = join(process.cwd(), '.claude-flow');
-  if (!agentStoreExists(storeDir)) {
-    mkdirAgentStore(storeDir, { recursive: true });
+  const dao = getAgentDAO();
+  for (const [id, data] of Object.entries(store.agents)) {
+    const a = data as Record<string, unknown>;
+    const existing = dao.get(id);
+    if (!existing) {
+      dao.spawn({
+        id,
+        type: (a.agentType as string) || (a.type as string) || 'worker',
+        name: (a.name as string) || null,
+        status: (a.status as string) || 'idle',
+        capabilities: (a.capabilities as string[]) || [],
+        currentTask: (a.currentTask as string) || null,
+        parentId: (a.parentId as string) || null,
+        provider: (a.provider as string) || null,
+        model: (a.model as string) || null,
+        metadata: (a.config as Record<string, unknown>) || (a.metadata as Record<string, unknown>) || {},
+      });
+    }
   }
-  writeAgentStore(join(storeDir, 'agents.json'), JSON.stringify(store, null, 2), 'utf-8');
+  // Handle deletions: agents present in DB but absent from store → terminate
+  const allAgents = dao.list(false);
+  for (const agent of allAgents) {
+    if (!(agent.id in store.agents)) {
+      dao.terminate(agent.id);
+    }
+  }
 }
 
 export const hiveMindTools: MCPTool[] = [
@@ -345,20 +396,16 @@ export const hiveMindTools: MCPTool[] = [
       // Load agent store once for all workers
       const agentStore = loadAgentStore();
 
-      // Compute real task metrics from task store
-      const taskStorePath = join(process.cwd(), '.claude-flow', 'tasks', 'store.json');
+      // Compute real task metrics from StateDB
       let pendingTaskCount = 0;
       let activeTaskCount = 0;
       let completedTaskCount = 0;
       try {
-        if (existsSync(taskStorePath)) {
-          const taskStore = JSON.parse(readFileSync(taskStorePath, 'utf-8'));
-          for (const task of Object.values(taskStore.tasks || {}) as Array<{ status: string }>) {
-            if (task.status === 'pending') pendingTaskCount++;
-            else if (task.status === 'in_progress') activeTaskCount++;
-            else if (task.status === 'completed') completedTaskCount++;
-          }
-        }
+        const taskDAO = new (await import('../dao/task-dao.js')).TaskDAO(StateDB.getInstance().database);
+        const taskStats = taskDAO.getStats();
+        pendingTaskCount = taskStats.byStatus['pending'] || 0;
+        activeTaskCount = taskStats.byStatus['in_progress'] || 0;
+        completedTaskCount = taskStats.byStatus['completed'] || 0;
       } catch { /* ignore */ }
 
       const workerCount = Math.max(1, state.workers.length);

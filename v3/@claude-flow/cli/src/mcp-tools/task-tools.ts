@@ -5,68 +5,11 @@
  * AND real execution via AgentProcessManager.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import type { MCPTool } from './types.js';
 import { getAgentProcessManager } from '../services/agent-process-manager.js';
-
-// Storage paths
-const STORAGE_DIR = '.claude-flow';
-const TASK_DIR = 'tasks';
-const TASK_FILE = 'store.json';
-
-interface TaskRecord {
-  taskId: string;
-  type: string;
-  description: string;
-  priority: 'low' | 'normal' | 'high' | 'critical';
-  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
-  progress: number;
-  assignedTo: string[];
-  tags: string[];
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  result?: Record<string, unknown>;
-}
-
-interface TaskStore {
-  tasks: Record<string, TaskRecord>;
-  version: string;
-}
-
-function getTaskDir(): string {
-  return join(process.cwd(), STORAGE_DIR, TASK_DIR);
-}
-
-function getTaskPath(): string {
-  return join(getTaskDir(), TASK_FILE);
-}
-
-function ensureTaskDir(): void {
-  const dir = getTaskDir();
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-}
-
-function loadTaskStore(): TaskStore {
-  try {
-    const path = getTaskPath();
-    if (existsSync(path)) {
-      const data = readFileSync(path, 'utf-8');
-      return JSON.parse(data);
-    }
-  } catch {
-    // Return empty store on error
-  }
-  return { tasks: {}, version: '3.0.0' };
-}
-
-function saveTaskStore(store: TaskStore): void {
-  ensureTaskDir();
-  writeFileSync(getTaskPath(), JSON.stringify(store, null, 2), 'utf-8');
-}
+import { StateDB } from '../state-db.js';
+import { TaskDAO } from '../dao/task-dao.js';
+import { AgentDAO } from '../dao/agent-dao.js';
 
 export const taskTools: MCPTool[] = [
   {
@@ -85,42 +28,31 @@ export const taskTools: MCPTool[] = [
       required: ['type', 'description'],
     },
     handler: async (input) => {
-      const store = loadTaskStore();
-      const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const db = StateDB.getInstance();
+      const tasks = new TaskDAO(db.database);
+      const assignTo = (input.assignTo as string[]) || [];
 
-      const task: TaskRecord = {
-        taskId,
+      const task = tasks.create({
         type: input.type as string,
         description: input.description as string,
-        priority: (input.priority as TaskRecord['priority']) || 'normal',
-        status: 'pending',
-        progress: 0,
-        assignedTo: (input.assignTo as string[]) || [],
+        priority: (input.priority as string) || 'normal',
+        assignedAgent: assignTo[0] || undefined,
         tags: (input.tags as string[]) || [],
-        createdAt: new Date().toISOString(),
-        startedAt: null,
-        completedAt: null,
-      };
-
-      store.tasks[taskId] = task;
+      });
 
       // If agents are assigned at creation, auto-dispatch execution
       const dispatched: string[] = [];
-      if (task.assignedTo.length > 0) {
-        task.status = 'in_progress';
-        task.startedAt = new Date().toISOString();
+      if (assignTo.length > 0) {
         const pm = getAgentProcessManager();
-        for (const agentId of task.assignedTo) {
+        for (const agentId of assignTo) {
           try {
             const running = pm.getAgent(agentId);
             if (running && running.status !== 'dead') {
-              pm.executeTask(agentId, taskId, task.description).catch(() => {
-                const s = loadTaskStore();
-                if (s.tasks[taskId]) {
-                  s.tasks[taskId].status = 'failed';
-                  s.tasks[taskId].completedAt = new Date().toISOString();
-                  saveTaskStore(s);
-                }
+              pm.executeTask(agentId, task.id, task.description!).catch(() => {
+                tasks.update(task.id, {
+                  status: 'failed',
+                  completedAt: new Date().toISOString(),
+                });
               });
               dispatched.push(agentId);
             }
@@ -130,17 +62,15 @@ export const taskTools: MCPTool[] = [
         }
       }
 
-      saveTaskStore(store);
-
       return {
-        taskId,
+        taskId: task.id,
         type: task.type,
         description: task.description,
         priority: task.priority,
         status: task.status,
         createdAt: task.createdAt,
-        assignedTo: task.assignedTo,
-        tags: task.tags,
+        assignedTo: task.assignedAgent ? [task.assignedAgent] : [],
+        tags: [],
         dispatched: dispatched.length > 0 ? dispatched : undefined,
       };
     },
@@ -157,20 +87,21 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
-      const store = loadTaskStore();
+      const db = StateDB.getInstance();
+      const tasks = new TaskDAO(db.database);
       const taskId = input.taskId as string;
-      const task = store.tasks[taskId];
+      const task = tasks.get(taskId);
 
       if (task) {
         return {
-          taskId: task.taskId,
+          taskId: task.id,
           type: task.type,
           description: task.description,
           status: task.status,
-          progress: task.progress,
+          progress: 0,
           priority: task.priority,
-          assignedTo: task.assignedTo,
-          tags: task.tags,
+          assignedTo: task.assignedAgent ? [task.assignedAgent] : [],
+          tags: [],
           createdAt: task.createdAt,
           startedAt: task.startedAt,
           completedAt: task.completedAt,
@@ -199,44 +130,37 @@ export const taskTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
-      const store = loadTaskStore();
-      let tasks = Object.values(store.tasks);
+      const db = StateDB.getInstance();
+      const dao = new TaskDAO(db.database);
 
-      // Apply filters
-      if (input.status) {
-        // Support comma-separated status values
+      // TaskDAO.list handles status, type, assignedAgent, priority, limit filters
+      let taskList = dao.list({
+        status: input.status as string | undefined,
+        type: input.type as string | undefined,
+        assignedAgent: input.assignedTo as string | undefined,
+        priority: input.priority as string | undefined,
+        limit: (input.limit as number) || 50,
+      });
+
+      // Support comma-separated status values (not handled by DAO)
+      if (input.status && (input.status as string).includes(',')) {
         const statuses = (input.status as string).split(',').map(s => s.trim());
-        tasks = tasks.filter(t => statuses.includes(t.status));
+        const allTasks = dao.list({ limit: (input.limit as number) || 50 });
+        taskList = allTasks.filter(t => statuses.includes(t.status));
       }
-      if (input.type) {
-        tasks = tasks.filter(t => t.type === input.type);
-      }
-      if (input.assignedTo) {
-        tasks = tasks.filter(t => t.assignedTo.includes(input.assignedTo as string));
-      }
-      if (input.priority) {
-        tasks = tasks.filter(t => t.priority === input.priority);
-      }
-
-      // Sort by creation date (newest first)
-      tasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-      // Apply limit
-      const limit = (input.limit as number) || 50;
-      tasks = tasks.slice(0, limit);
 
       return {
-        tasks: tasks.map(t => ({
-          taskId: t.taskId,
+        tasks: taskList.map(t => ({
+          taskId: t.id,
           type: t.type,
           description: t.description,
           status: t.status,
-          progress: t.progress,
+          progress: 0,
           priority: t.priority,
-          assignedTo: t.assignedTo,
+          assignedTo: t.assignedAgent ? [t.assignedAgent] : [],
           createdAt: t.createdAt,
         })),
-        total: tasks.length,
+        total: taskList.length,
         filters: {
           status: input.status,
           type: input.type,
@@ -259,44 +183,21 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
-      const store = loadTaskStore();
+      const db = StateDB.getInstance();
+      const tasks = new TaskDAO(db.database);
       const taskId = input.taskId as string;
-      const task = store.tasks[taskId];
+      const task = tasks.get(taskId);
 
       if (task) {
-        task.status = 'completed';
-        task.progress = 100;
-        task.completedAt = new Date().toISOString();
-        task.result = (input.result as Record<string, unknown>) || {};
-        saveTaskStore(store);
-
-        // Sync assigned agents back to idle and increment taskCount
-        if (task.assignedTo.length > 0) {
-          const agentStorePath = join(process.cwd(), STORAGE_DIR, 'agents', 'store.json');
-          try {
-            let agentStore: { agents: Record<string, Record<string, unknown>> } = { agents: {} };
-            if (existsSync(agentStorePath)) {
-              agentStore = JSON.parse(readFileSync(agentStorePath, 'utf-8'));
-            }
-            for (const agentId of task.assignedTo) {
-              if (agentStore.agents[agentId]) {
-                agentStore.agents[agentId].status = 'idle';
-                agentStore.agents[agentId].currentTask = null;
-                agentStore.agents[agentId].taskCount =
-                  ((agentStore.agents[agentId].taskCount as number) || 0) + 1;
-              }
-            }
-            writeFileSync(agentStorePath, JSON.stringify(agentStore, null, 2), 'utf-8');
-          } catch {
-            // Best-effort agent sync
-          }
-        }
+        // Atomic: updates task + resets assigned agent in one transaction
+        tasks.complete(taskId, (input.result as Record<string, unknown>) || {});
+        const completed = tasks.get(taskId)!;
 
         return {
-          taskId: task.taskId,
-          status: task.status,
-          completedAt: task.completedAt,
-          result: task.result,
+          taskId: completed.id,
+          status: completed.status,
+          completedAt: completed.completedAt,
+          result: completed.output,
         };
       }
 
@@ -322,32 +223,31 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
-      const store = loadTaskStore();
+      const db = StateDB.getInstance();
+      const tasks = new TaskDAO(db.database);
       const taskId = input.taskId as string;
-      const task = store.tasks[taskId];
+      const task = tasks.get(taskId);
 
       if (task) {
+        const changes: Record<string, unknown> = {};
         if (input.status) {
-          const newStatus = input.status as TaskRecord['status'];
-          task.status = newStatus;
-          if (newStatus === 'in_progress' && !task.startedAt) {
-            task.startedAt = new Date().toISOString();
+          changes.status = input.status as string;
+          if (input.status === 'in_progress' && !task.startedAt) {
+            changes.startedAt = new Date().toISOString();
           }
         }
-        if (typeof input.progress === 'number') {
-          task.progress = Math.min(100, Math.max(0, input.progress as number));
-        }
         if (input.assignTo) {
-          task.assignedTo = input.assignTo as string[];
+          changes.assignedAgent = (input.assignTo as string[])[0] || null;
         }
-        saveTaskStore(store);
+        tasks.update(taskId, changes);
+        const updated = tasks.get(taskId)!;
 
         return {
           success: true,
-          taskId: task.taskId,
-          status: task.status,
-          progress: task.progress,
-          assignedTo: task.assignedTo,
+          taskId: updated.id,
+          status: updated.status,
+          progress: 0,
+          assignedTo: updated.assignedAgent ? [updated.assignedAgent] : [],
         };
       }
 
@@ -372,85 +272,54 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
-      const store = loadTaskStore();
+      const db = StateDB.getInstance();
+      const taskDao = new TaskDAO(db.database);
+      const agentDao = new AgentDAO(db.database);
       const taskId = input.taskId as string;
-      const task = store.tasks[taskId];
+      const task = taskDao.get(taskId);
 
       if (!task) {
         return { taskId, error: 'Task not found' };
       }
 
-      const previouslyAssigned = [...task.assignedTo];
-
-      // Load agent store to sync worker state
-      const agentStorePath = join(process.cwd(), STORAGE_DIR, 'agents.json');
-      let agentStore: { agents: Record<string, Record<string, unknown>> } = { agents: {} };
-      try {
-        if (existsSync(agentStorePath)) {
-          agentStore = JSON.parse(readFileSync(agentStorePath, 'utf-8'));
-        }
-      } catch { /* ignore */ }
+      const previouslyAssigned = task.assignedAgent ? [task.assignedAgent] : [];
 
       if (input.unassign) {
         // Revert previously assigned agents to idle
         for (const agentId of previouslyAssigned) {
-          if (agentStore.agents[agentId]) {
-            agentStore.agents[agentId].status = 'idle';
-            agentStore.agents[agentId].currentTask = null;
-          }
+          agentDao.update(agentId, { status: 'idle', currentTask: undefined });
         }
-        task.assignedTo = [];
+        taskDao.update(taskId, { assignedAgent: null as any });
       } else {
         const agentIds = (input.agentIds as string[]) || [];
         // Revert old agents to idle
         for (const agentId of previouslyAssigned) {
-          if (!agentIds.includes(agentId) && agentStore.agents[agentId]) {
-            agentStore.agents[agentId].status = 'idle';
-            agentStore.agents[agentId].currentTask = null;
+          if (!agentIds.includes(agentId)) {
+            agentDao.update(agentId, { status: 'idle', currentTask: undefined });
           }
         }
-        // Set new agents to active
-        for (const agentId of agentIds) {
-          if (agentStore.agents[agentId]) {
-            agentStore.agents[agentId].status = 'active';
-            agentStore.agents[agentId].currentTask = taskId;
-          }
-        }
-        task.assignedTo = agentIds;
-        // Auto-transition task to in_progress if pending
-        if (task.status === 'pending' && agentIds.length > 0) {
-          task.status = 'in_progress';
-          if (!task.startedAt) {
-            task.startedAt = new Date().toISOString();
-          }
+        // Assign first agent atomically (task_assign uses TaskDAO.assign for atomicity)
+        if (agentIds.length > 0) {
+          taskDao.assign(taskId, agentIds[0]);
         }
       }
 
-      saveTaskStore(store);
-      // Save agent store
-      const agentDir = join(process.cwd(), STORAGE_DIR);
-      if (!existsSync(agentDir)) {
-        mkdirSync(agentDir, { recursive: true });
-      }
-      writeFileSync(agentStorePath, JSON.stringify(agentStore, null, 2), 'utf-8');
+      const updatedTask = taskDao.get(taskId)!;
 
-      // Dispatch to real agent process (fire-and-forget for each assigned agent)
+      // Dispatch to real agent process (fire-and-forget)
       const dispatched: string[] = [];
-      if (!input.unassign && task.assignedTo.length > 0) {
+      const assignedAgents = updatedTask.assignedAgent ? [updatedTask.assignedAgent] : [];
+      if (!input.unassign && assignedAgents.length > 0) {
         const pm = getAgentProcessManager();
-        for (const agentId of task.assignedTo) {
+        for (const agentId of assignedAgents) {
           try {
             const running = pm.getAgent(agentId);
             if (running && running.status !== 'dead') {
-              // Execute async — don't block the MCP response
-              pm.executeTask(agentId, taskId, task.description).catch(() => {
-                // Update task on failure
-                const s = loadTaskStore();
-                if (s.tasks[taskId]) {
-                  s.tasks[taskId].status = 'failed';
-                  s.tasks[taskId].completedAt = new Date().toISOString();
-                  saveTaskStore(s);
-                }
+              pm.executeTask(agentId, taskId, updatedTask.description!).catch(() => {
+                taskDao.update(taskId, {
+                  status: 'failed',
+                  completedAt: new Date().toISOString(),
+                });
               });
               dispatched.push(agentId);
             }
@@ -461,10 +330,10 @@ export const taskTools: MCPTool[] = [
       }
 
       return {
-        taskId: task.taskId,
-        assignedTo: task.assignedTo,
+        taskId: updatedTask.id,
+        assignedTo: assignedAgents,
         previouslyAssigned,
-        status: task.status,
+        status: updatedTask.status,
         dispatched,
       };
     },
@@ -482,21 +351,24 @@ export const taskTools: MCPTool[] = [
       required: ['taskId'],
     },
     handler: async (input) => {
-      const store = loadTaskStore();
+      const db = StateDB.getInstance();
+      const tasks = new TaskDAO(db.database);
       const taskId = input.taskId as string;
-      const task = store.tasks[taskId];
+      const task = tasks.get(taskId);
 
       if (task) {
-        task.status = 'cancelled';
-        task.completedAt = new Date().toISOString();
-        task.result = { cancelReason: input.reason || 'Cancelled by user' };
-        saveTaskStore(store);
+        const now = new Date().toISOString();
+        tasks.update(taskId, {
+          status: 'cancelled',
+          completedAt: now,
+          output: { cancelReason: input.reason || 'Cancelled by user' },
+        });
 
         return {
           success: true,
-          taskId: task.taskId,
-          status: task.status,
-          cancelledAt: task.completedAt,
+          taskId,
+          status: 'cancelled',
+          cancelledAt: now,
         };
       }
 
@@ -521,29 +393,22 @@ export const taskTools: MCPTool[] = [
       required: ['agentId', 'description'],
     },
     handler: async (input) => {
+      const db = StateDB.getInstance();
+      const tasks = new TaskDAO(db.database);
       const agentId = input.agentId as string;
       const description = input.description as string;
-      const store = loadTaskStore();
 
       // Create or reuse task record
       const taskId = (input.taskId as string)
         || `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      if (!store.tasks[taskId]) {
-        store.tasks[taskId] = {
-          taskId,
+      if (!tasks.get(taskId)) {
+        tasks.create({
+          id: taskId,
           type: 'execution',
           description,
-          priority: 'normal',
-          status: 'in_progress',
-          progress: 0,
-          assignedTo: [agentId],
-          tags: ['live-execution'],
-          createdAt: new Date().toISOString(),
-          startedAt: new Date().toISOString(),
-          completedAt: null,
-        };
-        saveTaskStore(store);
+          assignedAgent: agentId,
+        });
       }
 
       // Execute on real process
@@ -561,18 +426,15 @@ export const taskTools: MCPTool[] = [
       try {
         const result = await pm.executeTask(agentId, taskId, description);
 
-        // Update task store with result
-        const updated = loadTaskStore();
-        if (updated.tasks[taskId]) {
-          updated.tasks[taskId].status = result.status === 'completed' ? 'completed' : 'failed';
-          updated.tasks[taskId].completedAt = result.completedAt?.toISOString() ?? new Date().toISOString();
-          updated.tasks[taskId].progress = result.status === 'completed' ? 100 : 0;
-          updated.tasks[taskId].result = {
+        // Update task with result
+        tasks.update(taskId, {
+          status: result.status === 'completed' ? 'completed' : 'failed',
+          completedAt: result.completedAt?.toISOString() ?? new Date().toISOString(),
+          output: {
             output: result.output?.slice(0, 2000),
             error: result.error,
-          };
-          saveTaskStore(updated);
-        }
+          },
+        });
 
         return {
           success: result.status === 'completed',
