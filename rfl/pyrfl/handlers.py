@@ -220,6 +220,8 @@ def _smart_pick(param_name: str, label: str = "") -> str | None:
         if sid:
             return sid  # Auto-select the only active swarm
         return Prompt.ask(f"  {lbl}")
+    if pn in ("workflowid", "templateid"):
+        return _pick_workflow(lbl)
 
     # Not an ID — fall back to text prompt
     return None
@@ -378,6 +380,25 @@ def _pick_model(label: str = "Select model") -> str | None:
         acc = m.get("accuracy", "")
         acc_str = f"  acc={acc:.2f}" if isinstance(acc, (int, float)) else ""
         choices.append(f"{mid}  [{mtype}]  {status}{acc_str}")
+    sel = ui.choose(label, choices)
+    if not sel:
+        return None
+    return sel.split()[0]
+
+
+def _pick_workflow(label: str = "Select workflow") -> str | None:
+    """Fetch workflow list via MCP, present picker, return selected workflow ID."""
+    result = mcp_exec("workflow_list")
+    workflows = result.get("workflows", result.get("items", []))
+    if not workflows:
+        ui.warn("No workflows found")
+        return None
+    choices: list[str] = []
+    for w in workflows:
+        wid = w.get("workflowId", w.get("id", "?"))
+        status = w.get("status", "?")
+        name = w.get("name", w.get("description", ""))[:40]
+        choices.append(f"{wid}  [{status}]  {name}")
     sel = ui.choose(label, choices)
     if not sel:
         return None
@@ -570,10 +591,87 @@ def _agent_followups(sub: str, result: dict | None, depth: int = 0):
     run_command(target_cmd, target_sub, args=prefill if prefill else None)
 
 
+def _swarm_followup_actions(sub: str, result: dict) -> list[tuple[str, str, str, dict]]:
+    """Return (label, target_cmd, target_sub, prefill_args) for swarm commands."""
+    actions: list[tuple[str, str, str, dict]] = []
+    swarm_id = result.get("swarmId", result.get("id", ""))
+    agent_count = result.get("agentCount", result.get("spawned", 0))
+    swarm_status = (result.get("status") or "").lower()
+
+    if sub == "init":
+        actions.append(("swarm status", "swarm", "status", {}))
+        actions.append(("spawn agent", "agent", "spawn", {}))
+        actions.append(("start swarm", "swarm", "start", {}))
+        actions.append(("agent list", "agent", "list", {}))
+
+    elif sub == "start":
+        actions.append(("swarm status", "swarm", "status", {}))
+        actions.append(("agent list", "agent", "list", {}))
+        actions.append(("task list", "task", "list", {}))
+        if swarm_id:
+            actions.append(("stop swarm", "swarm", "stop", {"swarmId": swarm_id}))
+
+    elif sub == "status":
+        if swarm_status in ("running", "active"):
+            actions.append(("agent list", "agent", "list", {}))
+            actions.append(("task list", "task", "list", {}))
+            actions.append(("scale", "swarm", "scale", {}))
+            actions.append(("coordinate", "swarm", "coordinate", {}))
+            if swarm_id:
+                actions.append(("stop swarm", "swarm", "stop", {"swarmId": swarm_id}))
+        elif swarm_status in ("idle", "initialized"):
+            actions.append(("start swarm", "swarm", "start", {}))
+            actions.append(("spawn agent", "agent", "spawn", {}))
+        elif swarm_status in ("stopped", "terminated", "error"):
+            actions.append(("init new swarm", "swarm", "init", {}))
+        else:
+            # Unknown status — offer basics
+            actions.append(("agent list", "agent", "list", {}))
+            actions.append(("init new swarm", "swarm", "init", {}))
+
+    elif sub == "stop":
+        actions.append(("init new swarm", "swarm", "init", {}))
+        actions.append(("agent list", "agent", "list", {}))
+
+    elif sub == "scale":
+        actions.append(("swarm status", "swarm", "status", {}))
+        actions.append(("agent list", "agent", "list", {}))
+
+    elif sub == "coordinate":
+        actions.append(("swarm status", "swarm", "status", {}))
+        actions.append(("task list", "task", "list", {}))
+        actions.append(("agent list", "agent", "list", {}))
+
+    return actions
+
+
+def _swarm_followups(sub: str, result: dict | None, depth: int = 0):
+    """Show dynamic follow-up menu after a swarm command."""
+    if not sys.stdin.isatty() or depth >= _MAX_FOLLOWUP_DEPTH:
+        return
+    if result is None or result.get("error"):
+        return
+
+    actions = _swarm_followup_actions(sub, result)
+    if not actions:
+        return
+
+    labels = [a[0] for a in actions]
+    sel = ui.choose("Next", labels)
+    if not sel:
+        return
+
+    idx = labels.index(sel)
+    _, target_cmd, target_sub, prefill = actions[idx]
+    run_command(target_cmd, target_sub, args=prefill if prefill else None)
+
+
 def _maybe_followup(cmd: str, sub: str, result: dict | None, depth: int = 0):
-    """Dispatch to agent followups if applicable, otherwise show static hints."""
+    """Dispatch to dynamic followups for agent/swarm, otherwise static hints."""
     if cmd == "agent":
         _agent_followups(sub, result, depth)
+    elif cmd == "swarm":
+        _swarm_followups(sub, result, depth)
     else:
         ui.footer_hints(cmd, sub)
 
@@ -584,13 +682,13 @@ def _maybe_followup(cmd: str, sub: str, result: dict | None, depth: int = 0):
 
 # ── Swarm ──────────────────────────────────────────────────────────────────
 
-def _handle_swarm_init(args: dict):
+def _handle_swarm_init(args: dict) -> dict | None:
     """Custom swarm init with topology selection."""
     topology = args.get("topology") or ui.choose(
         "Topology", ["hierarchical", "mesh", "hierarchical-mesh", "hybrid"],
     )
     if not topology:
-        return
+        return None
     max_agents = args.get("maxAgents") or Prompt.ask("Max agents", default="8")
     strategy = args.get("strategy") or Prompt.ask("Strategy", default="specialized")
     with ui.spin("Initializing swarm..."):
@@ -599,14 +697,16 @@ def _handle_swarm_init(args: dict):
             "maxAgents": int(max_agents),
             "strategy": strategy,
         })
-    if result.get("success") or result.get("swarmId"):
-        ui.success(f"Swarm initialized ({topology}, max {max_agents} agents)")
-        ui.show_kv("Swarm", result)
-    else:
-        ui.error(result.get("error", "Swarm init failed"))
+    if result.get("error"):
+        ui.error(result["error"])
+        return result
+    ui.success(f"Swarm initialized ({topology}, max {max_agents} agents)")
+    ui.show_kv("Swarm", result)
+    result["_topology"] = topology
+    return result
 
 
-def _handle_swarm_start(args: dict):
+def _handle_swarm_start(args: dict) -> dict | None:
     """Multi-step swarm start: objective -> multi-select types -> init -> spawn -> task."""
     # 1. Prompt objective
     objective = args.get("objective") or Prompt.ask("Swarm objective")
@@ -676,8 +776,7 @@ def _handle_swarm_start(args: dict):
 
     ui.console.print()
     ui.success(f"Swarm ready: {spawned}/{agent_count} agents deployed")
-    ui.info("  Monitor: rfl swarm status")
-    ui.info("  Agents:  rfl agent list")
+    return {"swarmId": swarm_id, "spawned": spawned, "taskId": tid, "_sub": "start"}
 
 
 # ── Agent ──────────────────────────────────────────────────────────────────
@@ -857,8 +956,8 @@ def _handle_task_assign(args: dict):
     tid = args.get("taskId") or _pick_task("Assign task")
     if not tid:
         return
-    # Accept agentIds as list or string
-    agent_ids = args.get("agentIds")
+    # Accept agentIds (list or str) or agentId (singular from followups)
+    agent_ids = args.get("agentIds") or args.get("agentId")
     if isinstance(agent_ids, str):
         agent_ids = [agent_ids]
     if not agent_ids:
