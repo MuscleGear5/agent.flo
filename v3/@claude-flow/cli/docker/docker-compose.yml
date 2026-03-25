@@ -11,7 +11,7 @@
 #   docker compose -f v3/@claude-flow/cli/docker/docker-compose.yml --profile workers up -d --scale worker=5
 #
 # Environment (required for full/workers):
-#   ANTHROPIC_API_KEY — Your Anthropic API key
+#   ZAI_API_KEY, DEEPSEEK_API_KEY, MINIMAX_API_KEY — Custom provider keys
 
 services:
   # ── lite: MCP server on stdio (~80MB) ──────────────────────────
@@ -48,7 +48,9 @@ services:
       dockerfile: v3/@claude-flow/cli/docker/Dockerfile.full
     image: ruflo:full
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ZAI_API_KEY=${ZAI_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
       - NODE_ENV=production
       - CLAUDE_FLOW_LOG_LEVEL=${CLAUDE_FLOW_LOG_LEVEL:-info}
       - CLAUDE_FLOW_MEMORY_BACKEND=hybrid
@@ -81,7 +83,9 @@ services:
       dockerfile: v3/@claude-flow/cli/docker/Dockerfile
     image: ruflo:lite
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ZAI_API_KEY=${ZAI_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
       - CLAUDE_CODE_HEADLESS=true
       - CLAUDE_CODE_SANDBOX_MODE=${CLAUDE_FLOW_SANDBOX:-strict}
       - CLAUDE_FLOW_WORKERS=${CLAUDE_FLOW_WORKERS:-audit,optimize,testgaps}

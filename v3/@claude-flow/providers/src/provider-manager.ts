@@ -18,9 +18,7 @@ import {
   LLMRequest,
   LLMResponse,
   LLMStreamEvent,
-  LLMModel,
   ProviderManagerConfig,
-  LoadBalancingStrategy,
   HealthCheckResult,
   CostEstimate,
   UsageStats,
@@ -35,6 +33,9 @@ import { GoogleProvider } from './google-provider.js';
 import { CohereProvider } from './cohere-provider.js';
 import { OllamaProvider } from './ollama-provider.js';
 import { RuVectorProvider } from './ruvector-provider.js';
+import { DeepSeekProvider } from './deepseek-provider.js';
+import { MiniMaxProvider } from './minimax-provider.js';
+import { ZaiProvider } from './zai-provider.js';
 
 /**
  * Cache entry for request caching
@@ -127,6 +128,12 @@ export class ProviderManager extends EventEmitter {
         return new OllamaProvider(options);
       case 'ruvector':
         return new RuVectorProvider(options);
+      case 'deepseek':
+        return new DeepSeekProvider(options);
+      case 'minimax':
+        return new MiniMaxProvider(options);
+      case 'zai':
+        return new ZaiProvider(options);
       default:
         throw new Error(`Unknown provider: ${config.provider}`);
     }
@@ -276,27 +283,34 @@ export class ProviderManager extends EventEmitter {
   }
 
   /**
-   * Complete with fallback on failure
+   * Complete with fallback on failure - NO RETRIES, immediate fallback only
    */
   private async completWithFallback(
     request: LLMRequest,
     failedProvider: LLMProvider,
     originalError: LLMProviderError
   ): Promise<LLMResponse> {
-    const maxAttempts = this.config.fallback?.maxAttempts || 2;
-    let attempts = 0;
     let lastError = originalError;
 
-    const remainingProviders = Array.from(this.providers.values()).filter(
-      (p) => p.name !== failedProvider
-    );
+    // Use explicit fallback order if configured
+    const fallbackOrder = this.config.fallback?.fallbackOrder;
+    let fallbackProviders: ILLMProvider[];
 
-    for (const provider of remainingProviders) {
-      if (attempts >= maxAttempts) break;
-      attempts++;
+    if (fallbackOrder && fallbackOrder.length > 0) {
+      fallbackProviders = fallbackOrder
+        .map(name => this.providers.get(name))
+        .filter((p): p is ILLMProvider => p !== undefined && p.name !== failedProvider);
+    } else {
+      fallbackProviders = Array.from(this.providers.values()).filter(
+        (p) => p.name !== failedProvider
+      );
+    }
 
-      this.logger.info(`Attempting fallback to ${provider.name}`, {
-        attempt: attempts,
+    // Try FIRST fallback provider only - NO retries, no loop
+    if (fallbackProviders.length > 0) {
+      const provider = fallbackProviders[0];
+
+      this.logger.info(`Immediate fallback to ${provider.name}`, {
         originalProvider: failedProvider,
       });
 
@@ -305,7 +319,6 @@ export class ProviderManager extends EventEmitter {
         this.emit('fallback_success', {
           originalProvider: failedProvider,
           fallbackProvider: provider.name,
-          attempts,
         });
         return response;
       } catch (error) {
@@ -317,7 +330,6 @@ export class ProviderManager extends EventEmitter {
 
     this.emit('fallback_exhausted', {
       originalProvider: failedProvider,
-      attempts,
     });
 
     throw lastError;

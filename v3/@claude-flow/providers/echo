@@ -1,0 +1,14 @@
+npm error Lifecycle script `build` failed with error:
+npm error Lifecycle script `build` failed with error:
+npm error code 2
+npm error code 2
+npm error path /home/musclegear555/Workspaces/claude-code/agent.flo/v3/@claude-flow/providers
+npm error path /home/musclegear555/Workspaces/claude-code/agent.flo/v3/@claude-flow/providers
+npm error workspace @claude-flow/providers@3.0.0-alpha.6
+npm error workspace @claude-flow/providers@3.0.0-alpha.6
+npm error location /home/musclegear555/Workspaces/claude-code/agent.flo/v3/@claude-flow/providers
+npm error location /home/musclegear555/Workspaces/claude-code/agent.flo/v3/@claude-flow/providers
+npm error command failed
+npm error command failed
+npm error command sh -c tsc 'Rebuild complete'
+npm error command sh -c tsc 'Rebuild complete'

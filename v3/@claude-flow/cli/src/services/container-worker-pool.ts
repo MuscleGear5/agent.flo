@@ -421,7 +421,9 @@ export class ContainerWorkerPool extends EventEmitter {
       // Add environment variables
       const env = {
         ...this.config.env,
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+        ZAI_API_KEY: process.env.ZAI_API_KEY || '',
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || '',
+        MINIMAX_API_KEY: process.env.MINIMAX_API_KEY || '',
         CLAUDE_CODE_HEADLESS: 'true',
         CLAUDE_CODE_SANDBOX_MODE: this.config.defaultSandbox,
       };

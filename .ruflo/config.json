@@ -1,0 +1,11 @@
+{
+  "providers": [
+    { "provider": "zai", "model": "glm-5" },
+    { "provider": "minimax", "model": "MiniMax-M2.7" },
+    { "provider": "deepseek", "model": "deepseek-reasoner" }
+  ],
+  "fallback": {
+    "enabled": true,
+    "fallbackOrder": ["zai", "minimax", "deepseek"]
+  }
+}

@@ -20,6 +20,9 @@ export type LLMProvider =
   | 'ruvector'
   | 'openrouter'
   | 'litellm'
+  | 'deepseek'
+  | 'minimax'
+  | 'zai'
   | 'custom';
 
 export type LLMModel =
@@ -393,6 +396,7 @@ export interface ProviderManagerConfig {
   fallback?: {
     enabled: boolean;
     maxAttempts: number;
+    fallbackOrder?: LLMProvider[];
   };
   cache?: {
     enabled: boolean;

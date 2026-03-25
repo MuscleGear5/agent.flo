@@ -222,11 +222,11 @@ export class OutputFormatter {
     const lines: string[] = [];
     const pad = ' '.repeat(padding);
 
-    // Border characters
+    // Border characters (Unicode box drawing)
     const borderChars = border ? {
-      topLeft: '+', topRight: '+', bottomLeft: '+', bottomRight: '+',
-      horizontal: '-', vertical: '|',
-      leftT: '+', rightT: '+', topT: '+', bottomT: '+', cross: '+'
+      topLeft: '┏', topRight: '┓', bottomLeft: '┗', bottomRight: '┛',
+      horizontal: '━', vertical: '┃',
+      leftT: '┣', rightT: '┫', topT: '┳', bottomT: '┻', cross: '╋'
     } : {
       topLeft: '', topRight: '', bottomLeft: '', bottomRight: '',
       horizontal: '', vertical: ' ',
@@ -439,9 +439,9 @@ export class OutputFormatter {
     const width = maxLen + 4;
 
     const border = {
-      topLeft: '+', topRight: '+',
-      bottomLeft: '+', bottomRight: '+',
-      horizontal: '-', vertical: '|'
+      topLeft: '┏', topRight: '┓',
+      bottomLeft: '┗', bottomRight: '┛',
+      horizontal: '━', vertical: '┃'
     };
 
     const result: string[] = [];

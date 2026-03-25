@@ -70,9 +70,9 @@ const initCommand: Command = {
         tools: 'all'
       },
       providers: [
-        { name: 'anthropic', priority: 1, enabled: true },
-        { name: 'openrouter', priority: 2, enabled: false },
-        { name: 'ollama', priority: 3, enabled: false }
+        { name: 'zai', priority: 1, enabled: true },
+        { name: 'minimax', priority: 2, enabled: true },
+        { name: 'deepseek', priority: 3, enabled: true }
       ]
     };
 
@@ -257,10 +257,9 @@ const providersCommand: Command = {
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const providers = [
-      { name: 'anthropic', model: 'claude-3-5-sonnet-20241022', priority: 1, enabled: true, status: 'Active' },
-      { name: 'openrouter', model: 'claude-3.5-sonnet', priority: 2, enabled: false, status: 'Disabled' },
-      { name: 'ollama', model: 'llama3.2', priority: 3, enabled: false, status: 'Disabled' },
-      { name: 'gemini', model: 'gemini-2.0-flash', priority: 4, enabled: false, status: 'Disabled' }
+      { name: 'zai', model: 'glm-5', priority: 1, enabled: true, status: 'Active' },
+      { name: 'minimax', model: 'MiniMax-M2.7', priority: 2, enabled: true, status: 'Active' },
+      { name: 'deepseek', model: 'deepseek-reasoner', priority: 3, enabled: true, status: 'Active' }
     ];
 
     if (ctx.flags.format === 'json') {

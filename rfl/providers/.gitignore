@@ -1,0 +1,3 @@
+# Never commit actual keys
+.env
+*.resolved.json

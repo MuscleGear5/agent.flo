@@ -1,0 +1,68 @@
+#!/bin/zsh
+# Interactive Claude Code launcher with two-level menu
+# Features: Launch menu -> Provider/Ruflo selector, key status, remember last
+
+SCRIPT_DIR="${0:A:h}"
+LAST_USED_FILE="$SCRIPT_DIR/.last_provider"
+
+[[ "$*" == *"--help"* ]] && exec claude --dangerously-skip-permissions --help "$@"
+
+# Helper: Draw a styled box
+box() {
+  local title="$1"
+  local subtitle="$2"
+  local color="${3:-141}"
+  gum style --border thick --border-foreground "$color" --padding "0 2" \
+    --foreground "$color" --bold "$title" ${subtitle:+$subtitle}
+}
+
+# Helper: Run ruflo command
+run_ruflo() {
+  exec ruflo "$@"
+}
+
+# Level 1: Launch menu
+box "Claude Code Launcher" "" 245
+LAUNCH_CHOICE=$(gum choose --header="Select mode" --header.foreground=245 \
+  "Claude Code" "Ruflo")
+
+[[ -z "$LAUNCH_CHOICE" ]] && exit 0
+
+# Level 2: Provider selector (shown when Claude Code selected)
+if [[ "$LAUNCH_CHOICE" == "Claude Code" ]]; then
+  box "AI Providers" "Select your model" 51
+
+  # Load last used (trim whitespace)
+  last_used=""
+  [[ -f "$LAST_USED_FILE" ]] && last_used=$(<"$LAST_USED_FILE" | tr -d '[:space:]')
+
+  # Build display strings
+  zai_disp="ZAI (GLM)     glm-5              $([[ -n "$ZAI_API_KEY" ]] && echo "✓" || echo "✗")"
+  mm_disp="MiniMax       MiniMax-M2.7       $([[ -n "$MINIMAX_API_KEY" ]] && echo "✓" || echo "✗")"
+  ds_disp="DeepSeek      deepseek-reasoner  $([[ -n "$DEEPSEEK_API_KEY" ]] && echo "✓" || echo "✗")"
+
+  [[ "$last_used" == "cczai" ]] && zai_disp="$zai_disp  ◀"
+  [[ "$last_used" == "ccmm" ]] && mm_disp="$mm_disp  ◀"
+  [[ "$last_used" == "ccds" ]] && ds_disp="$ds_disp  ◀"
+
+  CHOICE=$(gum choose --header="Provider       Model              Key" --header.foreground=51 \
+    "$zai_disp" "$mm_disp" "$ds_disp")
+
+  [[ -z "$CHOICE" ]] && exit 0
+
+  # Map back to script name
+  case "${CHOICE%% *}" in
+    "ZAI")      script="cczai" ;;
+    "MiniMax")  script="ccmm" ;;
+    "DeepSeek") script="ccds" ;;
+    *)          exit 1 ;;
+  esac
+
+  echo "$script" > "$LAST_USED_FILE"
+  exec "$SCRIPT_DIR/$script" "$@"
+
+# Level 2: Ruflo - delegate to rfl script
+elif [[ "$LAUNCH_CHOICE" == "Ruflo" ]]; then
+  exec "$SCRIPT_DIR/rfl"
+fi
+

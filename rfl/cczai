@@ -1,0 +1,5 @@
+#!/bin/zsh
+# Start Claude Code with ZAI (GLM) provider - fully isolated
+PROVIDER_DIR="$HOME/.config/zsh/bin/ai/providers/zai"
+export ANTHROPIC_AUTH_TOKEN="$ZAI_API_KEY"
+exec claude --dangerously-skip-permissions --settings "$PROVIDER_DIR/settings.json" "$@"

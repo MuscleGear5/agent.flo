@@ -1,5 +1,5 @@
 {
-  "model": "claude-opus-4-6",
+  "model": "zai/glm-5",
   "customInstructions": "Follow the project's CLAUDE.md guidelines. Use concurrent execution for all operations. Prioritize v3 implementation with security-first development, 15-agent swarm coordination, phased performance optimization, and cross-platform helper automation.",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
@@ -186,8 +186,23 @@
     "version": "3.5.2",
     "enabled": true,
     "modelPreferences": {
-      "default": "claude-opus-4-6",
-      "routing": "claude-haiku-4-5-20251001"
+      "default": "zai/glm-5",
+      "routing": "zai/glm-5-turbo",
+      "reasoning": "deepseek/deepseek-reasoner",
+      "fast": "deepseek/deepseek-chat",
+      "structured": "minimax/MiniMax-M2.7"
+    },
+    "providerRouting": {
+      "anthropic": false,
+      "providers": ["zai", "minimax", "deepseek"],
+      "agentMapping": {
+        "coder": { "provider": "zai", "model": "glm-5" },
+        "architect": { "provider": "deepseek", "model": "deepseek-reasoner" },
+        "tester": { "provider": "minimax", "model": "MiniMax-M2.7" },
+        "reviewer": { "provider": "deepseek", "model": "deepseek-chat" },
+        "security-architect": { "provider": "deepseek", "model": "deepseek-reasoner" }
+      },
+      "fallbackChain": ["zai", "minimax", "deepseek"]
     },
     "agentTeams": {
       "enabled": true,

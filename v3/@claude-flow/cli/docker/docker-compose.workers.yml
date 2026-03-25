@@ -7,7 +7,7 @@
 #   docker-compose -f docker-compose.workers.yml down
 #
 # Environment Variables (required):
-#   ANTHROPIC_API_KEY - Your Anthropic API key
+#   ZAI_API_KEY, DEEPSEEK_API_KEY, MINIMAX_API_KEY - Custom provider keys
 #
 # Optional:
 #   CLAUDE_FLOW_WORKERS - Comma-separated list of workers to enable
@@ -36,7 +36,9 @@ services:
         delay: 5s
         max_attempts: 3
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ZAI_API_KEY=${ZAI_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
       - CLAUDE_CODE_HEADLESS=true
       - CLAUDE_CODE_SANDBOX_MODE=${CLAUDE_FLOW_SANDBOX:-strict}
       - CLAUDE_FLOW_WORKERS=${CLAUDE_FLOW_WORKERS:-audit,optimize,testgaps}

@@ -355,7 +355,9 @@ function envVars(): string {
 \`\`\`bash
 CLAUDE_FLOW_CONFIG=./claude-flow.config.json
 CLAUDE_FLOW_LOG_LEVEL=info
-ANTHROPIC_API_KEY=sk-ant-...
+ZAI_API_KEY=your_key
+DEEPSEEK_API_KEY=your_key
+MINIMAX_API_KEY=your_key
 CLAUDE_FLOW_MEMORY_BACKEND=hybrid
 CLAUDE_FLOW_MEMORY_PATH=./data/memory
 \`\`\``;

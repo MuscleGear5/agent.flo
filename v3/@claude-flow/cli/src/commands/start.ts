@@ -461,6 +461,12 @@ export const startCommand: Command = {
       description: 'Skip starting MCP server',
       type: 'boolean',
       default: false
+    },
+    {
+      name: 'format',
+      description: 'Output format (json, table)',
+      type: 'string',
+      default: 'table'
     }
   ],
   examples: [

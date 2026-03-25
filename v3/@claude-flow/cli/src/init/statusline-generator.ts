@@ -551,7 +551,7 @@ function getIntegrationStatus() {
 
   const hasDatabase = ['.swarm/memory.db', '.claude-flow/memory.db', 'data/memory.db']
     .some(p => fs.existsSync(path.join(CWD, p)));
-  const hasApi = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY);
+  const hasApi = !!(process.env.ZAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.MINIMAX_API_KEY);
 
   return { mcpServers, hasDatabase, hasApi };
 }

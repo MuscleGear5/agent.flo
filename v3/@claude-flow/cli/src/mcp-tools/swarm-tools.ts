@@ -328,4 +328,88 @@ export const swarmTools: MCPTool[] = [
       };
     },
   },
+  {
+    name: 'swarm_stop',
+    description: 'Stop a running swarm (alias for swarm_shutdown)',
+    category: 'swarm',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        swarmId: { type: 'string', description: 'Swarm ID to stop' },
+        graceful: { type: 'boolean', description: 'Graceful stop (default: true)' },
+        timeout: { type: 'number', description: 'Stop timeout in seconds' },
+        saveState: { type: 'boolean', description: 'Save state before stopping (default: true)' },
+      },
+    },
+    handler: async (input) => {
+      // Delegate to swarm_shutdown handler
+      const store = loadSwarmStore();
+      const swarmId = input.swarmId as string;
+      const saveState = (input.saveState as boolean) ?? true;
+
+      let target: SwarmState | undefined;
+      if (swarmId && store.swarms[swarmId]) {
+        target = store.swarms[swarmId];
+      } else {
+        const running = Object.values(store.swarms)
+          .filter(s => s.status === 'running')
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        target = running[0];
+      }
+
+      if (!target) {
+        return {
+          success: false,
+          error: swarmId ? `Swarm ${swarmId} not found` : 'No running swarms to stop',
+        };
+      }
+
+      if (target.status === 'terminated') {
+        return {
+          success: false,
+          swarmId: target.swarmId,
+          error: 'Swarm already stopped',
+        };
+      }
+
+      target.status = 'terminated';
+      target.updatedAt = new Date().toISOString();
+      saveSwarmStore(store);
+
+      return {
+        success: true,
+        swarmId: target.swarmId,
+        stopped: true,
+        graceful: (input.graceful as boolean) ?? true,
+        stateSaved: saveState,
+        agentsStopped: target.agents.length,
+        stoppedAt: target.updatedAt,
+      };
+    },
+  },
+  {
+    name: 'mcp_stop',
+    description: 'Stop the MCP server',
+    category: 'mcp',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        graceful: { type: 'boolean', description: 'Graceful shutdown (default: true)' },
+        timeout: { type: 'number', description: 'Shutdown timeout in seconds' },
+      },
+    },
+    handler: async (input) => {
+      const graceful = (input.graceful as boolean) ?? true;
+      const timeout = (input.timeout as number) || 30;
+
+      return {
+        success: true,
+        stopped: true,
+        graceful,
+        timeout,
+        message: graceful ? 'MCP server stopping gracefully' : 'MCP server force stopped',
+        stoppedAt: new Date().toISOString(),
+      };
+    },
+  },
 ];

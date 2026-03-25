@@ -264,7 +264,7 @@ const listCommand: Command = {
 
       // Format for display
       const displayAgents = result.agents.map(agent => ({
-        id: agent.id,
+        id: (agent as any).agentId || agent.id,
         type: agent.agentType,
         status: agent.status,
         created: new Date(agent.createdAt).toLocaleTimeString(),

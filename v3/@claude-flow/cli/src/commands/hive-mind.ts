@@ -434,8 +434,8 @@ const initCommand: Command = {
     const config = {
       topology: topology || 'hierarchical-mesh',
       consensus: consensus || 'byzantine',
-      maxAgents: ctx.flags.maxAgents as number || 15,
-      persist: ctx.flags.persist as boolean,
+      maxAgents: (ctx.flags.maxAgents as number) || 15,
+      persist: (ctx.flags.persist ?? true) as boolean,
       memoryBackend: ctx.flags.memoryBackend as string || 'hybrid'
     };
 

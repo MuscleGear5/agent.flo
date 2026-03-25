@@ -29,6 +29,12 @@ const checkCommand: Command = {
       type: 'boolean',
       default: false,
     },
+    {
+      name: 'format',
+      description: 'Output format (json, table)',
+      type: 'string',
+      default: 'table',
+    },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const detailed = ctx.flags.detailed as boolean;

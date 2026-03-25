@@ -38,7 +38,7 @@ steps:
       '--timeout', '300',
       '--allow-unauthenticated',
       '--set-env-vars', 'NODE_ENV=production',
-      '--set-secrets', 'OPENAI_API_KEY=openai-api-key:latest,GOOGLE_API_KEY=google-api-key:latest,OPENROUTER_API_KEY=openrouter-api-key:latest'
+      '--set-secrets', 'ZAI_API_KEY=zai-api-key:latest,DEEPSEEK_API_KEY=deepseek-api-key:latest,MINIMAX_API_KEY=minimax-api-key:latest'
     ]
 
 substitutions:

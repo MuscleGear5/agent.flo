@@ -121,12 +121,12 @@ const listCommand: Command = {
           { key: 'updated', header: 'Last Updated', width: 18 }
         ],
         data: result.sessions.map(s => ({
-          id: s.id,
+          id: (s as any).sessionId || s.id,
           name: s.name || '-',
-          status: formatStatus(s.status),
-          agents: s.agentCount,
-          tasks: s.taskCount,
-          updated: formatDate(s.updatedAt)
+          status: formatStatus(s.status || 'saved'),
+          agents: (s as any).stats?.agents ?? s.agentCount ?? 0,
+          tasks: (s as any).stats?.tasks ?? s.taskCount ?? 0,
+          updated: formatDate((s as any).savedAt || s.updatedAt)
         }))
       });
 
@@ -663,8 +663,9 @@ const importCommand: Command = {
 
       // Parse based on extension
       if (absolutePath.endsWith('.yaml') || absolutePath.endsWith('.yml')) {
-        // Simple YAML parsing (basic implementation)
-        data = JSON.parse(content); // Would need proper YAML parser
+        spinner.fail('YAML import not supported');
+        output.printError('Please convert to JSON format first.');
+        return { success: false, exitCode: 1 };
       } else {
         data = JSON.parse(content);
       }
@@ -864,7 +865,7 @@ export const sessionCommand: Command = {
     { command: 'claude-flow session import backup.json', description: 'Import session from file' },
     { command: 'claude-flow session current', description: 'Show current session' }
   ],
-  action: async (ctx: CommandContext): Promise<CommandResult> => {
+  action: async (_ctx: CommandContext): Promise<CommandResult> => {
     // Show help if no subcommand
     output.writeln();
     output.writeln(output.bold('Session Management Commands'));

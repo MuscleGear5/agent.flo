@@ -35,10 +35,9 @@
           "dockerfile": "mcp-bridge/Dockerfile",
           "port": 3001,
           "env_vars": [
-            "OPENAI_API_KEY",
-            "GOOGLE_API_KEY",
-            "OPENROUTER_API_KEY",
-            "ANTHROPIC_API_KEY",
+            "ZAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "MINIMAX_API_KEY",
             "SEARCH_API_URL",
             "RESEARCH_API_URL",
             "MCP_GROUP_INTELLIGENCE",
@@ -206,10 +205,9 @@
         "adr": "docs/adr/ADR-032-RVF-PRIVATE-MCP-TUNNEL.md"
       },
       "env_only_keys": [
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "OPENROUTER_API_KEY",
-        "ANTHROPIC_API_KEY",
+        "ZAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MINIMAX_API_KEY",
         "OPENID_CLIENT_SECRET"
       ]
     }
@@ -240,7 +238,7 @@
     "chat_completions_proxy": true,
     "upstream_error_normalization": true,
     "goap_search_pipeline": true,
-    "multi_provider_routing": ["openai", "gemini", "openrouter"],
+    "multi_provider_routing": ["zai", "minimax", "deepseek"],
     "oidc_auth": true,
     "branded_assets": true,
     "tool_extensibility": true,

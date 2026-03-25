@@ -260,7 +260,7 @@ export const sessionTools: MCPTool[] = [
       // Sort
       const sortBy = (input.sortBy as string) || 'date';
       if (sortBy === 'date') {
-        sessions.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+        sessions.sort((a, b) => new Date((b as any).savedAt || (b as any).startedAt || 0).getTime() - new Date((a as any).savedAt || (a as any).startedAt || 0).getTime());
       } else if (sortBy === 'name') {
         sessions.sort((a, b) => a.name.localeCompare(b.name));
       } else if (sortBy === 'size') {
@@ -273,11 +273,11 @@ export const sessionTools: MCPTool[] = [
 
       return {
         sessions: sessions.map(s => ({
-          sessionId: s.sessionId,
-          name: s.name,
-          description: s.description,
-          savedAt: s.savedAt,
-          stats: s.stats,
+          sessionId: s.sessionId || (s as any).id,
+          name: s.name || '',
+          description: s.description || '',
+          savedAt: s.savedAt || (s as any).startedAt || '',
+          stats: s.stats || { tasks: 0, agents: 0, memoryEntries: 0, totalSize: 0 },
         })),
         total: sessions.length,
         limit,
@@ -354,6 +354,59 @@ export const sessionTools: MCPTool[] = [
         sessionId,
         error: 'Session not found',
       };
+    },
+  },
+  {
+    name: 'session_current',
+    description: 'Get current active session information',
+    category: 'session',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        includeStats: { type: 'boolean', description: 'Include session statistics' },
+      },
+    },
+    handler: async (input) => {
+      const includeStats = input.includeStats as boolean;
+      const sessionsDir = getSessionDir();
+
+      // Find most recently modified session file
+      try {
+        const files = readdirSync(sessionsDir)
+          .filter(f => f.endsWith('.json'))
+          .map(f => {
+            const fullPath = join(sessionsDir, f);
+            const stat = statSync(fullPath);
+            return { file: f, mtime: stat.mtimeMs, path: fullPath };
+          })
+          .sort((a, b) => b.mtime - a.mtime);
+
+        if (files.length === 0) {
+          throw new Error('No active session');
+        }
+
+        const latestFile = files[0];
+        const session = JSON.parse(readFileSync(latestFile.path, 'utf-8'));
+
+        const result = {
+          sessionId: session.sessionId || latestFile.file.replace('.json', ''),
+          name: session.name,
+          status: session.status || 'active',
+          startedAt: session.savedAt || new Date(latestFile.mtime).toISOString(),
+          ...(includeStats ? {
+            stats: session.stats || {
+              agentCount: session.data?.agents?.length || 0,
+              taskCount: session.data?.tasks?.length || 0,
+              memoryEntries: session.data?.memory?.length || 0,
+              duration: Date.now() - latestFile.mtime,
+            },
+          } : {}),
+        };
+
+        return result;
+      } catch {
+        throw new Error('No active session found');
+      }
     },
   },
 ];

@@ -959,4 +959,92 @@ export const hiveMindTools: MCPTool[] = [
       return { action, error: 'Unknown action' };
     },
   },
+  {
+    name: 'hive-mind_task',
+    description: 'Submit a task to the hive-mind for distributed execution by workers',
+    category: 'hive-mind',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'Task description' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Task priority', default: 'medium' },
+        requireConsensus: { type: 'boolean', description: 'Whether task requires consensus before execution', default: false },
+        timeout: { type: 'number', description: 'Task timeout in seconds', default: 300 },
+      },
+      required: ['description'],
+    },
+    handler: async (input) => {
+      const state = loadHiveState();
+
+      if (!state.initialized) {
+        return { success: false, error: 'Hive-mind not initialized. Run hive-mind_init first.' };
+      }
+
+      if (state.workers.length === 0) {
+        return { success: false, error: 'No workers available. Spawn workers with hive-mind_spawn first.' };
+      }
+
+      const description = input.description as string;
+      const priority = (input.priority as string) || 'medium';
+      const requireConsensus = input.requireConsensus === true;
+      const timeout = (input.timeout as number) || 300;
+
+      // Generate task ID
+      const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      // Assign workers based on priority — critical/high get more workers
+      const maxAssign = priority === 'critical' ? state.workers.length
+        : priority === 'high' ? Math.min(3, state.workers.length)
+        : priority === 'medium' ? Math.min(2, state.workers.length)
+        : 1;
+      const assignedTo = state.workers.slice(0, maxAssign);
+
+      // Estimate time based on priority
+      const estimatedTime = priority === 'critical' ? '< 1 min'
+        : priority === 'high' ? '1-2 min'
+        : priority === 'medium' ? '2-5 min'
+        : '5-10 min';
+
+      // If consensus required, create a proposal first
+      if (requireConsensus && state.workers.length > 1) {
+        const proposalId = `prop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const proposal: ConsensusProposal = {
+          proposalId,
+          type: 'task-assignment',
+          value: { taskId, description, priority, assignedTo },
+          proposedBy: state.queen?.agentId || 'system',
+          proposedAt: new Date().toISOString(),
+          votes: {},
+          status: 'pending',
+          strategy: 'raft',
+        };
+        state.consensus.pending.push(proposal);
+      }
+
+      // Store task in shared memory
+      state.sharedMemory[`task:${taskId}`] = {
+        taskId,
+        description,
+        priority,
+        status: requireConsensus ? 'pending-consensus' : 'assigned',
+        assignedTo,
+        requiresConsensus: requireConsensus,
+        createdAt: new Date().toISOString(),
+        timeout,
+      };
+
+      state.updatedAt = new Date().toISOString();
+      saveHiveState(state);
+
+      return {
+        taskId,
+        description,
+        status: requireConsensus ? 'pending-consensus' : 'assigned',
+        assignedTo,
+        priority,
+        requiresConsensus: requireConsensus,
+        estimatedTime,
+      };
+    },
+  },
 ];

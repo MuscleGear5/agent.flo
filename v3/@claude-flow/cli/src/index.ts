@@ -8,12 +8,28 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import type { Command, CommandContext, CommandResult, V3Config, CLIError } from './types.js';
+import type { CommandContext, V3Config, CLIError } from './types.js';
 import { CommandParser, commandParser } from './parser.js';
 import { OutputFormatter, output } from './output.js';
-import { commands, commandsByCategory, commandRegistry, getCommand, getCommandAsync, getCommandNames, hasCommand } from './commands/index.js';
+import { commands, commandsByCategory, getCommand, getCommandAsync, getCommandNames, hasCommand } from './commands/index.js';
 import { suggestCommand } from './suggest.js';
 import { runStartupUpdateCheck } from './update/index.js';
+
+// Flush stdout/stderr before exiting to prevent silent failures
+function exitWithFlush(code: number): void {
+  process.exitCode = code;
+  // Force flush by writing empty strings and waiting for drain
+  const stdoutDone = !process.stdout.write('');
+  const stderrDone = !process.stderr.write('');
+  if (stdoutDone || stderrDone) {
+    const pending: Promise<void>[] = [];
+    if (stdoutDone) pending.push(new Promise(r => process.stdout.once('drain', r)));
+    if (stderrDone) pending.push(new Promise(r => process.stderr.once('drain', r)));
+    Promise.all(pending).then(() => process.exit(code));
+  } else {
+    process.exit(code);
+  }
+}
 
 // Read version from package.json at runtime
 function getPackageVersion(): string {
@@ -125,7 +141,7 @@ export class CLI {
           const availableCommands = Array.from(new Set([...commands.map(c => c.name), ...getCommandNames()]));
           const { message } = suggestCommand(attemptedCommand, availableCommands);
           this.output.writeln(this.output.dim(`  ${message}`));
-          process.exit(1);
+          exitWithFlush(1);
         } else {
           this.showHelp();
         }
@@ -149,7 +165,8 @@ export class CLI {
         const availableCommands = Array.from(new Set([...commands.map(c => c.name), ...getCommandNames()]));
         const { message } = suggestCommand(commandName, availableCommands);
         this.output.writeln(this.output.dim(`  ${message}`));
-        process.exit(1);
+        exitWithFlush(1);
+        return;
       }
 
       // Handle subcommand (supports nested subcommands)
@@ -213,7 +230,8 @@ export class CLI {
         for (const error of validationErrors) {
           this.output.printError(error);
         }
-        process.exit(1);
+        exitWithFlush(1);
+        return;
       }
 
       // Build context
@@ -239,7 +257,8 @@ export class CLI {
         }
 
         if (result && !result.success) {
-          process.exit(result.exitCode || 1);
+          exitWithFlush(result.exitCode || 1);
+          return;
         }
       } else {
         // No action - show command help
@@ -488,7 +507,7 @@ export class CLI {
         this.output.writeln(this.output.dim(JSON.stringify(cliError.details, null, 2)));
       }
 
-      process.exit(cliError.exitCode);
+      exitWithFlush(cliError.exitCode);
     } else {
       // Generic error
       this.output.printError(error.message);
@@ -498,7 +517,7 @@ export class CLI {
         this.output.writeln(this.output.dim(error.stack || ''));
       }
 
-      process.exit(1);
+      exitWithFlush(1);
     }
   }
 }

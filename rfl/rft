@@ -1,0 +1,949 @@
+#!/bin/zsh
+# rft - ruflo/agent.flo tutor
+# Dynamically discovers commands, agents, skills from global + project context
+# Uses DeepSeek (chat for routing, reasoner for explanations)
+#
+# Usage:
+#   rft                          → interactive browse & learn mode
+#   rft "how do I spawn agents"  → answer a question
+#   rft agent spawn              → explain a specific command
+#   rft --scan                   → show discovered context
+#   rft --quiz                   → test your knowledge
+
+SCRIPT_DIR="${0:A:h}"
+RUFLO_PROJECT="$SCRIPT_DIR/ruflo"
+
+# ── API config ──────────────────────────────────────────────
+DEEPSEEK_KEY=$(grep 'DEEPSEEK_API_KEY=' ~/.keys 2>/dev/null | head -1 | cut -d'"' -f2)
+DEEPSEEK_URL="https://api.deepseek.com/chat/completions"
+
+# ── Color palette (matches neon theme) ──────────────────────
+C_PURPLE=141
+C_CYAN=51
+C_GREEN=48
+C_PINK=198
+C_YELLOW=226
+C_ORANGE=208
+C_RED=196
+C_DIM=245
+
+# ── Spinner (stderr) ───────────────────────────────────────
+show_spinner() {
+    local msg="$1" pid="$2"
+    local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r\033[38;5;${C_PURPLE}m%s\033[0m %s" "${frames[$((i % 10 + 1))]}" "$msg" >&2
+        i=$((i + 1))
+        sleep 0.08
+    done
+    printf "\r\033[2K" >&2
+    wait "$pid" 2>/dev/null
+}
+
+# ── Gum helpers ─────────────────────────────────────────────
+has_gum() { command -v gum &>/dev/null; }
+
+box() {
+    local title="$1" sub="$2" color="${3:-$C_PURPLE}"
+    if has_gum; then
+        gum style --border thick --border-foreground "$color" --padding "0 2" \
+            --foreground "$color" --bold "$title" ${sub:+"$sub"}
+    else
+        echo "═══ $title ${sub:+— $sub} ═══"
+    fi
+}
+
+dim() { printf "\033[38;5;${C_DIM}m%s\033[0m\n" "$1"; }
+bright() { printf "\033[38;5;${1}m%s\033[0m\n" "$2"; }
+
+# ── Command extraction & execution ───────────────────────────
+# Extract runnable commands from AI response and let user pick & run them
+offer_commands() {
+    local text="$1"
+    # Extract lines that look like ruflo commands from code blocks or inline
+    local -a cmds=()
+    local _pending=""
+    while IFS= read -r line; do
+        # Strip leading whitespace, common prefixes ($, #, >, backticks)
+        line="${line#"${line%%[! ]*}"}"
+        line="${line#\$ }"
+        line="${line#\# }"
+        line="${line#\> }"
+        line="${line#\`}"
+        line="${line%\`}"
+        line="${line#\`\`\`*}"
+        # Handle line continuations (trailing \)
+        if [[ -n "$_pending" ]]; then
+            _pending="$_pending ${line%\\}"
+            [[ "$line" != *'\' ]] && { cmds+=("$_pending"); _pending=""; }
+            continue
+        fi
+        if [[ "$line" == ruflo\ * ]]; then
+            # Fix colon syntax: ruflo swarm:start → ruflo swarm start
+            # Only fix cmd:sub pattern, not colons in arguments
+            if [[ "$line" =~ ^(ruflo[[:space:]]+)([a-zA-Z_-]+):([a-zA-Z_-]+)(.*) ]]; then
+                line="${match[1]}${match[2]} ${match[3]}${match[4]}"
+            fi
+            # Handle multi-line backslash continuation
+            if [[ "$line" == *'\' ]]; then
+                _pending="${line%\\}"
+            else
+                cmds+=("$line")
+            fi
+        fi
+    done <<< "$text"
+    [[ -n "$_pending" ]] && cmds+=("$_pending")
+
+    (( ${#cmds} == 0 )) && return
+
+    echo ""
+    if has_gum; then
+        # Capture newline-separated output (not word-split)
+        local -a selected=()
+        selected=("${(@f)$(gum choose --no-limit \
+            --header="Run these commands? (space to toggle, enter to run)" \
+            --header.foreground=$C_GREEN \
+            -- "${cmds[@]}" "(skip)")}")
+
+        for c in "${selected[@]}"; do
+            [[ -z "$c" || "$c" == "(skip)" ]] && return
+            echo ""
+            bright $C_GREEN "▸ $c"
+            ${=c}
+            echo ""
+        done
+    fi
+}
+
+# ── Dynamic Discovery ──────────────────────────────────────
+
+# Discover all top-level ruflo commands
+discover_commands() {
+    ruflo --help 2>&1 | awk '/^  [a-z]/{print $1}' | sort -u
+}
+
+# Discover subcommands for a given command
+discover_subcmds() {
+    local cmd="$1"
+    ruflo "$cmd" --help 2>&1 | awk '/^  [a-z]/{print $1}' | sort -u
+}
+
+# Get full help text for a command path
+get_help() {
+    if [[ -n "$2" ]]; then
+        ruflo "$1" "$2" --help 2>&1
+    else
+        ruflo "$1" --help 2>&1
+    fi
+}
+
+# Discover project-level agents
+discover_agents() {
+    local agent_dir="$RUFLO_PROJECT/.claude/agents"
+    [[ -d "$agent_dir" ]] || return
+    local -a agents=()
+    for dir in "$agent_dir"/*(/N); do
+        for f in "$dir"/*.md(N); do
+            local name="${f:t:r}"
+            local category="${dir:t}"
+            agents+=("$category/$name")
+        done
+    done
+    # Also check top-level .md files
+    for f in "$agent_dir"/*.md(N); do
+        agents+=("${f:t:r}")
+    done
+    printf '%s\n' "${agents[@]}" | sort -u
+}
+
+# Discover project-level skills
+discover_skills() {
+    local skill_dir="$RUFLO_PROJECT/.claude/skills"
+    [[ -d "$skill_dir" ]] || return
+    for dir in "$skill_dir"/*(N); do
+        [[ -d "$dir" ]] && echo "${dir:t}"
+    done
+}
+
+# Discover project-level commands (slash commands)
+discover_slash_commands() {
+    local cmd_dir="$RUFLO_PROJECT/.claude/commands"
+    [[ -d "$cmd_dir" ]] || return
+    for item in "$cmd_dir"/*(.N) "$cmd_dir"/**/*(.N); do
+        echo "${item#$cmd_dir/}" | sed 's/\.md$//'
+    done
+}
+
+# Discover MCP servers
+discover_mcp() {
+    local mcp_file="$RUFLO_PROJECT/.mcp.json"
+    [[ -f "$mcp_file" ]] || return
+    jq -r '.mcpServers | keys[]' "$mcp_file" 2>/dev/null
+}
+
+# Discover helpers
+discover_helpers() {
+    local helper_dir="$RUFLO_PROJECT/.claude/helpers"
+    [[ -d "$helper_dir" ]] || return
+    for f in "$helper_dir"/*(.N); do
+        echo "${f:t}"
+    done
+}
+
+# Build full context snapshot
+build_context() {
+    local ctx=""
+    local tmpdir=$(mktemp -d)
+
+    # Global commands — parallel discovery
+    ctx+="## RUFLO COMMANDS (ruflo v$(ruflo --version 2>&1 | grep -oP '[\d.]+' | head -1))\n"
+    local cmds=($(discover_commands))
+    # Discover all subcommands in parallel
+    for cmd in "${cmds[@]}"; do
+        ruflo "$cmd" --help 2>&1 | awk '/^  [a-z]/{print $1}' | sort -u > "$tmpdir/$cmd" &
+    done
+    wait
+    # Build context from cached results
+    for cmd in "${cmds[@]}"; do
+        local subs=$(cat "$tmpdir/$cmd" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+        if [[ -n "$subs" ]]; then
+            ctx+="  $cmd: $subs\n"
+        else
+            ctx+="  $cmd\n"
+        fi
+    done
+    rm -rf "$tmpdir"
+
+    # Project agents
+    local agents=($(discover_agents))
+    if (( ${#agents} > 0 )); then
+        ctx+="\n## PROJECT AGENTS (${#agents} found)\n"
+        for a in "${agents[@]}"; do
+            ctx+="  $a\n"
+        done
+    fi
+
+    # Project skills
+    local skills=($(discover_skills))
+    if (( ${#skills} > 0 )); then
+        ctx+="\n## PROJECT SKILLS (${#skills} found)\n"
+        for s in "${skills[@]}"; do
+            ctx+="  $s\n"
+        done
+    fi
+
+    # Slash commands
+    local slashcmds=($(discover_slash_commands))
+    if (( ${#slashcmds} > 0 )); then
+        ctx+="\n## SLASH COMMANDS (${#slashcmds} found)\n"
+        for c in "${slashcmds[@]}"; do
+            ctx+="  /$c\n"
+        done
+    fi
+
+    # MCP servers
+    local mcps=($(discover_mcp))
+    if (( ${#mcps} > 0 )); then
+        ctx+="\n## MCP SERVERS\n"
+        for m in "${mcps[@]}"; do
+            ctx+="  $m\n"
+        done
+    fi
+
+    # Helpers
+    local helpers=($(discover_helpers))
+    if (( ${#helpers} > 0 )); then
+        ctx+="\n## HELPERS (${#helpers} scripts)\n"
+        for h in "${helpers[@]}"; do
+            ctx+="  $h\n"
+        done
+    fi
+
+    # Live state
+    local agent_count=$(ruflo agent list --quiet 2>/dev/null | wc -l)
+    local task_count=$(ruflo task list --quiet 2>/dev/null | wc -l)
+    ctx+="\n## LIVE STATE\n"
+    ctx+="  Active agents: $agent_count\n"
+    ctx+="  Pending tasks: $task_count\n"
+    ctx+="  Workspace: $RUFLO_PROJECT\n"
+
+    echo "$ctx"
+}
+
+# Cache context (rebuild if older than 10 min, shared across invocations)
+CACHE_FILE="/tmp/rft-context-cache"
+get_context() {
+    if [[ -f "$CACHE_FILE" ]] && (( $(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0) < 600 )); then
+        cat "$CACHE_FILE"
+    else
+        dim "Building context (first run is slow, cached for 10 min)..."
+        build_context | tee "$CACHE_FILE"
+    fi
+}
+
+# ── AI Agents ──────────────────────────────────────────────
+# NOTE: all status output goes to stderr (>&2) so it doesn't
+# get captured by $(call_...) command substitution
+
+# call_deepseek - fast model for routing/JSON extraction
+call_deepseek() {
+    local system_prompt="$1" user_prompt="$2" spinner_msg="${3:-Thinking...}"
+    local response_file=$(mktemp)
+
+    dim "$spinner_msg" >&2
+
+    jq -n \
+        --arg sys "$system_prompt" \
+        --arg usr "$user_prompt" \
+        '{
+            model: "deepseek-chat",
+            messages: [
+                {role: "system", content: $sys},
+                {role: "user", content: $usr}
+            ],
+            temperature: 0.2
+        }' > "$response_file.req"
+
+    curl -s --max-time 30 "${DEEPSEEK_URL}" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${DEEPSEEK_KEY}" \
+        -d @"$response_file.req" > "$response_file"
+    rm -f "$response_file.req"
+
+    if [[ ! -s "$response_file" ]]; then
+        dim "API error: empty response" >&2
+        rm -f "$response_file"
+        return 1
+    fi
+    if ! jq empty "$response_file" 2>/dev/null; then
+        dim "API error" >&2
+        rm -f "$response_file"
+        return 1
+    fi
+
+    jq -r '.choices[0].message.content // empty' "$response_file" 2>/dev/null
+    rm -f "$response_file"
+}
+
+# call_reasoner - deep thinking model for explanations/tutorials
+call_reasoner() {
+    local user_prompt="$1" spinner_msg="${2:-Reasoning...}"
+    local response_file=$(mktemp)
+
+    dim "$spinner_msg" >&2
+
+    jq -n \
+        --arg usr "$user_prompt" \
+        '{
+            model: "deepseek-reasoner",
+            messages: [
+                {role: "user", content: $usr}
+            ]
+        }' > "$response_file.req"
+
+    curl -s --max-time 120 "${DEEPSEEK_URL}" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${DEEPSEEK_KEY}" \
+        -d @"$response_file.req" > "$response_file"
+    rm -f "$response_file.req"
+
+    if [[ ! -s "$response_file" ]]; then
+        dim "Reasoner: empty response — falling back to chat" >&2
+        rm -f "$response_file"
+        call_deepseek "You are a helpful ruflo tutor." "$user_prompt" "Thinking..."
+        return
+    fi
+    if ! jq empty "$response_file" 2>/dev/null; then
+        dim "Reasoner: bad response" >&2
+        rm -f "$response_file"
+        call_deepseek "You are a helpful ruflo tutor." "$user_prompt" "Thinking..."
+        return
+    fi
+
+    if jq -e '.error' "$response_file" >/dev/null 2>&1; then
+        dim "Reasoner error — falling back to chat" >&2
+        rm -f "$response_file"
+        call_deepseek "You are a helpful ruflo tutor." "$user_prompt" "Thinking..."
+        return
+    fi
+
+    jq -r '.choices[0].message.content // empty' "$response_file" 2>/dev/null
+    rm -f "$response_file"
+}
+
+# ── Modes ──────────────────────────────────────────────────
+
+# --scan: show discovered context
+do_scan() {
+    box "Context Discovery" "ruflo + project" $C_CYAN
+    echo ""
+
+    echo "Scanning..."
+    local ctx=$(build_context)
+    echo ""
+
+    if has_gum; then
+        echo "$ctx" | gum format
+    else
+        echo "$ctx"
+    fi
+}
+
+# Explain a specific command path: rft agent spawn
+do_explain() {
+    local cmd="$1" sub="$2"
+    box "ruflo $cmd${sub:+ $sub}" "Command Reference" $C_CYAN
+    echo ""
+
+    # Get live help
+    local help_text=$(get_help "$cmd" "$sub")
+
+    if has_gum; then
+        echo "$help_text" | gum format -t code
+    else
+        echo "$help_text"
+    fi
+
+    echo ""
+    dim "Getting tutorial explanation..."
+    echo ""
+
+    # Reasoner explains based on help text alone (no need for full context)
+    local prompt="You are a ruflo/agent.flo tutor. Explain this command based on its help output.
+
+COMMAND HELP OUTPUT:
+$help_text
+
+Provide a clear, practical tutorial for \`ruflo $cmd${sub:+ $sub}\`:
+
+1. **What it does** (one sentence)
+2. **Common usage patterns** (3-5 examples with real flags)
+3. **Required vs optional args** (table if helpful)
+4. **Tips & gotchas** (things that aren't obvious)
+5. **Related commands** (what to use before/after this)
+
+IMPORTANT: ruflo uses SPACE-separated syntax (ruflo swarm start), NEVER colon syntax (ruflo swarm:start).
+Keep it concise and practical. Use markdown formatting."
+
+    local explanation=$(call_reasoner "$prompt" "Explaining command...")
+
+    if [[ -n "$explanation" ]]; then
+        echo ""
+        if has_gum; then
+            echo "$explanation" | gum format
+        else
+            echo "$explanation"
+        fi
+        offer_commands "$explanation"
+    fi
+
+    # Follow-up options
+    echo ""
+    if has_gum; then
+        local action=$(gum choose --header="What next?" --header.foreground=$C_PURPLE \
+            "Run ruflo $cmd${sub:+ $sub}" "Build with flags" "Ask a follow-up" "Back")
+        case "$action" in
+            "Run ruflo"*)
+                echo ""
+                bright $C_GREEN "▸ ruflo $cmd${sub:+ $sub}"
+                ruflo "$cmd" ${sub:+"$sub"}
+                ;;
+            "Build with flags"*)
+                do_construct "$cmd" "$sub"
+                ;;
+            "Ask a follow-up")
+                local q=$(gum input --placeholder="Your question..." --header="Follow-up" --header.foreground=$C_CYAN)
+                [[ -n "$q" ]] && do_question "$q"
+                ;;
+        esac
+    fi
+}
+
+# Construct a command interactively
+do_construct() {
+    local cmd="$1" sub="$2"
+    box "Build Command" "ruflo $cmd${sub:+ $sub}" $C_GREEN
+    echo ""
+
+    local help_text=$(get_help "$cmd" "$sub")
+    local ctx=$(get_context)
+
+    local prompt="You are a ruflo command builder. Given this help output, identify ALL flags/arguments the user might need.
+
+HELP:
+$help_text
+
+Return a JSON array of objects, each with:
+- \"flag\": the flag or argument name
+- \"desc\": one-line description
+- \"required\": true/false
+- \"type\": \"boolean\"|\"string\"|\"choice\"
+- \"choices\": [array] if type is choice, null otherwise
+- \"default\": default value or null
+- \"placeholder\": example value
+
+ONLY return valid JSON, no markdown wrapping."
+
+    dim "Analyzing command flags..."
+    local flags_json=$(call_deepseek \
+        "You extract command flags into JSON. Return ONLY a JSON array, no markdown." \
+        "$prompt" "Analyzing flags...")
+
+    # Clean potential markdown wrapping
+    flags_json=$(echo "$flags_json" | sed 's/^```json//;s/^```//;s/```$//' | tr -d '\n')
+
+    # Validate JSON
+    if ! echo "$flags_json" | jq empty 2>/dev/null; then
+        dim "Could not parse flags, falling back to manual input"
+        if has_gum; then
+            local manual=$(gum input --placeholder="flags and args" --header="ruflo $cmd $sub ..." --header.foreground=$C_GREEN)
+            [[ -n "$manual" ]] && echo "" && bright $C_GREEN "→ ruflo $cmd $sub $manual"
+        fi
+        return
+    fi
+
+    local built_args=""
+    local flag_count=$(echo "$flags_json" | jq 'length')
+
+    for (( i=0; i<flag_count; i++ )); do
+        local flag=$(echo "$flags_json" | jq -r ".[$i].flag")
+        local desc=$(echo "$flags_json" | jq -r ".[$i].desc")
+        local required=$(echo "$flags_json" | jq -r ".[$i].required")
+        local type=$(echo "$flags_json" | jq -r ".[$i].type")
+        local placeholder=$(echo "$flags_json" | jq -r ".[$i].placeholder // empty")
+        local choices_raw=$(echo "$flags_json" | jq -r ".[$i].choices // empty")
+
+        local label="$flag"
+        [[ "$required" == "true" ]] && label="$flag (required)"
+
+        if has_gum; then
+            case "$type" in
+                boolean)
+                    if gum confirm "$label — $desc"; then
+                        built_args+=" $flag"
+                    fi
+                    ;;
+                choice)
+                    local -a ch=()
+                    while IFS= read -r c; do ch+=("$c"); done < <(echo "$choices_raw" | jq -r '.[]' 2>/dev/null)
+                    if (( ${#ch} > 0 )); then
+                        local val=$(gum choose --header="$label: $desc" --header.foreground=$C_CYAN "${ch[@]}" "(skip)")
+                        [[ "$val" != "(skip)" && -n "$val" ]] && built_args+=" $flag $val"
+                    fi
+                    ;;
+                string)
+                    local val=$(gum input --placeholder="${placeholder:-value}" --header="$label: $desc" --header.foreground=$C_CYAN)
+                    [[ -n "$val" ]] && built_args+=" $flag \"$val\""
+                    ;;
+            esac
+        else
+            echo "$label — $desc"
+            echo -n "  Value (empty to skip): "
+            read -r val
+            [[ -n "$val" ]] && built_args+=" $flag $val"
+        fi
+    done
+
+    local full_cmd="ruflo $cmd${sub:+ $sub}$built_args"
+    echo ""
+
+    if has_gum; then
+        gum style --bold --foreground $C_GREEN --border double --border-foreground $C_GREEN \
+            --padding "1 2" "$full_cmd"
+        echo ""
+        local action=$(gum choose "Execute" "Copy" "Edit & execute" "Cancel")
+        case "$action" in
+            Execute)
+                echo ""
+                # Safe: split on words, no eval
+                ${=full_cmd}
+                ;;
+            Copy)
+                echo "$full_cmd" | xclip -selection clipboard 2>/dev/null \
+                    || echo "$full_cmd" | wl-copy 2>/dev/null \
+                    || echo "(no clipboard tool — command shown above)"
+                bright $C_GREEN "Copied!"
+                ;;
+            "Edit & execute")
+                local edited=$(gum input --value "$full_cmd")
+                [[ -n "$edited" ]] && ${=edited}
+                ;;
+        esac
+    else
+        echo "Command: $full_cmd"
+        echo -n "Execute? [y/N]: "
+        read -r yn
+        [[ "$yn" == [yY] ]] && ${=full_cmd}
+    fi
+}
+
+# Answer a free-form question
+do_question() {
+    local question="$1"
+    box "Question" "" $C_CYAN
+    echo ""
+    dim "$question"
+    echo ""
+
+    local ctx=$(get_context)
+
+    # Single reasoner call with full context
+    local answer=$(call_reasoner \
+        "You are a ruflo/agent.flo tutor helping a user learn the system.
+
+SYSTEM CONTEXT (dynamically discovered):
+$ctx
+
+USER QUESTION: $question
+
+Provide a helpful, practical answer:
+- Show exact commands they should run
+- IMPORTANT: ruflo uses SPACE-separated syntax (ruflo swarm start), NEVER colon syntax (ruflo swarm:start)
+- Explain flags and arguments
+- Include common patterns and examples
+- If multiple approaches exist, recommend the best one first
+- Reference project-level agents/skills if relevant
+- Use markdown formatting with code blocks
+
+Be concise but thorough. This is a learning moment." \
+        "Generating answer...")
+
+    echo ""
+    if has_gum; then
+        echo "$answer" | gum format
+    else
+        echo "$answer"
+    fi
+
+    # Offer to run extracted commands
+    [[ -n "$answer" ]] && offer_commands "$answer"
+
+    # Follow-up loop
+    echo ""
+    while true; do
+        if has_gum; then
+            local action=$(gum choose --header="Continue?" --header.foreground=$C_PURPLE \
+                "Run a command" "Ask follow-up" "Done")
+            case "$action" in
+                "Run a command")
+                    [[ -n "$answer" ]] && offer_commands "$answer"
+                    ;;
+                "Ask follow-up")
+                    local q=$(gum input --placeholder="Next question..." --header.foreground=$C_CYAN)
+                    [[ -z "$q" ]] && break
+                    echo ""
+                    do_question "$q"
+                    return
+                    ;;
+                Done|"") break ;;
+            esac
+        else
+            break
+        fi
+    done
+}
+
+# Interactive browse mode
+do_browse() {
+    box "Ruflo Tutor" "Learn by exploring" $C_PURPLE
+    echo ""
+
+    # Pre-cache command list (used by Browse commands)
+    local -a _cached_cmds=($(discover_commands))
+
+    while true; do
+        local mode
+        if has_gum; then
+            mode=$(gum choose --header="What would you like to do?" --header.foreground=$C_PURPLE \
+                "Ask a question" \
+                "Browse commands" \
+                "Browse agents" \
+                "Browse skills" \
+                "Browse slash commands" \
+                "System scan" \
+                "Quiz me" \
+                "Exit")
+        else
+            echo "1) Ask a question  2) Browse commands  3) System scan  4) Exit"
+            echo -n "Choice: "
+            read -r choice
+            case "$choice" in
+                1) mode="Ask a question" ;;
+                2) mode="Browse commands" ;;
+                3) mode="System scan" ;;
+                *) mode="Exit" ;;
+            esac
+        fi
+
+        case "$mode" in
+            "Ask a question")
+                local q
+                if has_gum; then
+                    q=$(gum input --placeholder="e.g. how do I spawn a coder agent?" \
+                        --header="Your question" --header.foreground=$C_CYAN --width=80)
+                else
+                    echo -n "Question: "
+                    read -r q
+                fi
+                [[ -n "$q" ]] && do_question "$q"
+                echo ""
+                ;;
+
+            "Browse commands")
+                local -a cmds=("${_cached_cmds[@]}")
+                if has_gum; then
+                    local cmd=$(gum filter --header="Select command" --header.foreground=$C_CYAN \
+                        --placeholder="type to filter..." "${cmds[@]}")
+                    [[ -z "$cmd" ]] && continue
+
+                    # Get subcommands
+                    local -a subs=($(discover_subcmds "$cmd"))
+                    if (( ${#subs} > 0 )); then
+                        local sub=$(gum filter --header="ruflo $cmd ..." --header.foreground=$C_CYAN \
+                            --placeholder="type to filter..." "(overview)" "${subs[@]}")
+                        [[ -z "$sub" ]] && continue
+                        if [[ "$sub" == "(overview)" ]]; then
+                            do_explain "$cmd"
+                        else
+                            do_explain "$cmd" "$sub"
+                        fi
+                    else
+                        do_explain "$cmd"
+                    fi
+                fi
+                echo ""
+                ;;
+
+            "Browse agents")
+                local -a agents=($(discover_agents))
+                if (( ${#agents} == 0 )); then
+                    dim "No project agents found in $RUFLO_PROJECT/.claude/agents/"
+                    echo ""
+                    continue
+                fi
+                if has_gum; then
+                    local agent=$(gum filter --header="Project Agents (${#agents})" \
+                        --header.foreground=$C_PINK --placeholder="type to filter..." "${agents[@]}")
+                    [[ -z "$agent" ]] && continue
+
+                    local agent_file="$RUFLO_PROJECT/.claude/agents/${agent}.md"
+
+                    if [[ -f "$agent_file" ]]; then
+                        echo ""
+                        box "Agent: $agent" "" $C_PINK
+                        echo ""
+                        # Show first 30 lines (description + frontmatter)
+                        head -30 "$agent_file" | gum format
+                        echo ""
+                        local action=$(gum choose "Read full definition" "Ask about this agent" "Back")
+                        case "$action" in
+                            "Read full"*)
+                                cat "$agent_file" | gum format | gum pager
+                                ;;
+                            "Ask about"*)
+                                local content=$(cat "$agent_file")
+                                do_question "Explain this agent and when/how I should use it:\n\n$content"
+                                ;;
+                        esac
+                    fi
+                fi
+                echo ""
+                ;;
+
+            "Browse skills")
+                local -a skills=($(discover_skills))
+                if (( ${#skills} == 0 )); then
+                    dim "No project skills found in $RUFLO_PROJECT/.claude/skills/"
+                    echo ""
+                    continue
+                fi
+                if has_gum; then
+                    local skill=$(gum filter --header="Project Skills (${#skills})" \
+                        --header.foreground=$C_ORANGE --placeholder="type to filter..." "${skills[@]}")
+                    [[ -z "$skill" ]] && continue
+
+                    local skill_dir="$RUFLO_PROJECT/.claude/skills/$skill"
+                    echo ""
+                    box "Skill: $skill" "" $C_ORANGE
+                    echo ""
+
+                    # Find main skill file
+                    local skill_file=$(ls "$skill_dir"/*.md 2>/dev/null | head -1)
+                    if [[ -f "$skill_file" ]]; then
+                        head -40 "$skill_file" | gum format
+                        echo ""
+                        local action=$(gum choose "Read full definition" "Ask about this skill" "Back")
+                        case "$action" in
+                            "Read full"*) cat "$skill_file" | gum format | gum pager ;;
+                            "Ask about"*)
+                                local content=$(head -100 "$skill_file")
+                                do_question "Explain this skill and when/how to use it:\n\n$content"
+                                ;;
+                        esac
+                    else
+                        ls "$skill_dir"/ 2>/dev/null
+                    fi
+                fi
+                echo ""
+                ;;
+
+            "Browse slash commands")
+                local -a slashcmds=($(discover_slash_commands))
+                if (( ${#slashcmds} == 0 )); then
+                    dim "No slash commands found"
+                    echo ""
+                    continue
+                fi
+                if has_gum; then
+                    local sc=$(gum filter --header="Slash Commands (${#slashcmds})" \
+                        --header.foreground=$C_YELLOW --placeholder="type to filter..." "${slashcmds[@]}")
+                    [[ -z "$sc" ]] && continue
+
+                    local sc_file="$RUFLO_PROJECT/.claude/commands/${sc}.md"
+                    [[ ! -f "$sc_file" ]] && sc_file="$RUFLO_PROJECT/.claude/commands/${sc}"
+                    if [[ -f "$sc_file" ]]; then
+                        echo ""
+                        box "/$sc" "" $C_YELLOW
+                        echo ""
+                        cat "$sc_file" | gum format | gum pager
+                    fi
+                fi
+                echo ""
+                ;;
+
+            "System scan")
+                do_scan
+                echo ""
+                ;;
+
+            "Quiz me")
+                do_quiz
+                echo ""
+                ;;
+
+            Exit|"") break ;;
+        esac
+    done
+}
+
+# Quiz mode
+do_quiz() {
+    box "Quiz Mode" "Test your ruflo knowledge" $C_YELLOW
+    echo ""
+
+    local ctx=$(get_context)
+    dim "Generating questions..."
+
+    local questions=$(call_deepseek \
+        "You are a ruflo CLI quiz generator. Create 5 practical multiple-choice questions about using ruflo commands. Each question should test real usage, not trivia.
+
+Return as JSON array:
+[{\"q\": \"question\", \"choices\": [\"a\",\"b\",\"c\",\"d\"], \"answer\": 0, \"explanation\": \"why\"}]
+
+Only valid JSON, no markdown." \
+        "RUFLO SYSTEM:\n$ctx\n\nGenerate 5 practical quiz questions." \
+        "Generating quiz...")
+
+    # Strip markdown fences only (preserve JSON structure)
+    questions=$(echo "$questions" | sed '/^```/d')
+
+    if ! echo "$questions" | jq empty 2>/dev/null; then
+        dim "Could not generate quiz. Try again later."
+        return
+    fi
+
+    local total=$(echo "$questions" | jq 'length')
+    local score=0
+
+    for (( i=0; i<total; i++ )); do
+        local q=$(echo "$questions" | jq -r ".[$i].q")
+        local answer_idx=$(echo "$questions" | jq -r ".[$i].answer")
+        local explanation=$(echo "$questions" | jq -r ".[$i].explanation")
+        local -a choices=()
+        while IFS= read -r c; do choices+=("$c"); done < <(echo "$questions" | jq -r ".[$i].choices[]")
+
+        echo ""
+        bright $C_CYAN "Q$((i+1))/$total: $q"
+        echo ""
+
+        local selected
+        if has_gum; then
+            selected=$(gum choose "${choices[@]}")
+        else
+            for (( j=0; j<${#choices}; j++ )); do
+                echo "  $((j+1))) ${choices[$j]}"
+            done
+            echo -n "Answer: "
+            read -r num
+            selected="${choices[$((num-1))]}"
+        fi
+
+        local correct="${choices[$((answer_idx + 1))]}"
+        if [[ "$selected" == "$correct" ]]; then
+            bright $C_GREEN "Correct!"
+            score=$((score + 1))
+        else
+            bright $C_RED "Wrong — correct answer: $correct"
+        fi
+        dim "$explanation"
+    done
+
+    echo ""
+    box "Score: $score/$total" "" $(( score >= 3 ? C_GREEN : C_RED ))
+}
+
+# ── Main dispatch ──────────────────────────────────────────
+case "${1:-}" in
+    --help|-h)
+        cat <<'EOF'
+rft - ruflo/agent.flo tutor
+
+Usage:
+  rft                            Interactive browse & learn
+  rft "your question"            Ask anything about ruflo
+  rft <command> [subcommand]     Explain a specific command
+  rft --scan                     Show discovered context
+  rft --quiz                     Test your knowledge
+  rft --help                     Show this help
+
+Examples:
+  rft "how do I create a swarm"
+  rft agent spawn
+  rft hooks pretrain
+  rft --scan
+EOF
+        exit 0
+        ;;
+    --scan)
+        do_scan
+        exit 0
+        ;;
+    --quiz)
+        do_quiz
+        exit 0
+        ;;
+    -*)
+        echo "Unknown flag: $1" >&2
+        echo "Run: rft --help" >&2
+        exit 1
+        ;;
+    "")
+        # Interactive mode
+        if [[ ! -t 0 ]]; then
+            echo "Error: interactive mode requires a TTY" >&2
+            echo "Usage: rft \"your question\"" >&2
+            exit 1
+        fi
+        do_browse
+        ;;
+    *)
+        # Check if it looks like a ruflo command (first arg matches a known command)
+        if ruflo "$1" --help &>/dev/null 2>&1; then
+            do_explain "$1" "$2"
+        else
+            # Treat entire argument as a question
+            do_question "$*"
+        fi
+        ;;
+esac

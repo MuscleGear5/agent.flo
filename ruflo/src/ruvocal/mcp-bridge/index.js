@@ -94,21 +94,21 @@ const TOOL_GROUPS = {
   // --- Claude Code ---
   "claude-code": {
     enabled: process.env.MCP_GROUP_CLAUDE_CODE === "true",
-    description: "Anthropic Claude Code — file editing, bash execution, code analysis (requires ANTHROPIC_API_KEY)",
+    description: "Claude Code — file editing, bash execution, code analysis",
     source: "claude",
   },
 
   // --- Gemini MCP ---
   gemini: {
     enabled: process.env.MCP_GROUP_GEMINI === "true",
-    description: "Google Gemini conversation context, multimodal capabilities (requires GOOGLE_API_KEY)",
+    description: "Gemini conversation context, multimodal capabilities",
     source: "gemini-mcp",
   },
 
   // --- OpenAI Codex ---
   codex: {
     enabled: process.env.MCP_GROUP_CODEX === "true",
-    description: "OpenAI Codex coding agent — code generation and execution (requires OPENAI_API_KEY)",
+    description: "Codex coding agent — code generation and execution",
     source: "codex",
   },
 };
@@ -569,9 +569,7 @@ Execute 66+ specialized agents with boosted code editing and AgentDB.
 
     "claude-code": `# Claude Code Group
 
-Anthropic Claude Code MCP server — full coding agent capabilities.
-
-Requires: ANTHROPIC_API_KEY environment variable.
+Claude Code MCP server — full coding agent capabilities.
 
 ## Capabilities
 - File reading and editing
@@ -586,9 +584,7 @@ Requires: ANTHROPIC_API_KEY environment variable.
 
     gemini: `# Gemini MCP Group
 
-Google Gemini with conversation context management.
-
-Requires: GOOGLE_API_KEY environment variable (already set for Gemini models).
+Gemini with conversation context management.
 
 ## Capabilities
 - Conversation context management
@@ -601,9 +597,7 @@ Requires: GOOGLE_API_KEY environment variable (already set for Gemini models).
 
     codex: `# Codex Group
 
-OpenAI Codex coding agent.
-
-Requires: OPENAI_API_KEY environment variable (already set for OpenAI models).
+Codex coding agent.
 
 ## Capabilities
 - Code generation and execution
@@ -645,8 +639,8 @@ Requires: OPENAI_API_KEY environment variable (already set for OpenAI models).
 // =============================================================================
 
 async function geminiGroundedSearch(query, mode = "search") {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) return { error: "No GOOGLE_API_KEY configured for search" };
+  const apiKey = process.env.ZAI_API_KEY;
+  if (!apiKey) return { error: "No ZAI_API_KEY configured for search" };
 
   const model = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -1128,17 +1122,17 @@ app.get("/mcp-servers", (_, res) => {
 // =============================================================================
 
 const PROVIDER_ROUTES = {
-  openai: { baseURL: "https://api.openai.com/v1/chat/completions", getKey: () => process.env.OPENAI_API_KEY },
-  gemini: { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", getKey: () => process.env.GOOGLE_API_KEY },
-  openrouter: { baseURL: "https://openrouter.ai/api/v1/chat/completions", getKey: () => process.env.OPENROUTER_API_KEY },
+  zai: { baseURL: "https://api.z.ai/api/coding/paas/v4/chat/completions", getKey: () => process.env.ZAI_API_KEY },
+  minimax: { baseURL: "https://api.minimax.io/v1/chat/completions", getKey: () => process.env.MINIMAX_API_KEY },
+  deepseek: { baseURL: "https://api.deepseek.com/v1/chat/completions", getKey: () => process.env.DEEPSEEK_API_KEY },
 };
 
 function resolveProvider(model) {
   if (typeof model === "string") {
-    if (model.startsWith("gemini-")) return "gemini";
-    if (model.includes("/")) return "openrouter";
+    if (model.startsWith("deepseek")) return "deepseek";
+    if (model.startsWith("MiniMax") || model.startsWith("abab")) return "minimax";
   }
-  return "openai";
+  return "zai";
 }
 
 // =============================================================================

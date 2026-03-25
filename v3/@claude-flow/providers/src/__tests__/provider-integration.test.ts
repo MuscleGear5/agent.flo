@@ -6,7 +6,7 @@
  * Run with: npx vitest run src/__tests__/provider-integration.test.ts
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 
@@ -19,13 +19,15 @@ import {
   GoogleProvider,
   OllamaProvider,
   RuVectorProvider,
-  ProviderManager,
+  ZaiProvider,
+  DeepSeekProvider,
+  MiniMaxProvider,
   createProviderManager,
   LLMRequest,
   LLMProviderConfig,
   ProviderManagerConfig,
 } from '../index.js';
-import { BaseProviderOptions, consoleLogger } from '../base-provider.js';
+import { consoleLogger } from '../base-provider.js';
 
 // Test configuration
 const TEST_PROMPT = 'Say "Hello from Claude Flow V3!" in exactly 5 words.';
@@ -268,11 +270,191 @@ describe('Provider Integration Tests', () => {
     }, 30000);
   });
 
+  describe('ZAI (Zhipu) Provider', () => {
+    const apiKey = process.env.ZAI_API_KEY;
+
+    it.skipIf(!apiKey)('should complete request with GLM-5', async () => {
+      const provider = new ZaiProvider({
+        config: {
+          provider: 'zai',
+          apiKey,
+          apiUrl: 'https://api.z.ai/api/coding/paas/v4',
+          model: 'glm-5',
+          maxTokens: 100,
+        },
+        logger: consoleLogger,
+      });
+
+      await provider.initialize();
+
+      const response = await provider.complete(createTestRequest());
+
+      console.log('ZAI Response:', response.content);
+      console.log('Usage:', response.usage);
+      console.log('Cost:', response.cost);
+
+      expect(response.content).toBeTruthy();
+      expect(response.provider).toBe('zai');
+      expect(response.usage.totalTokens).toBeGreaterThan(0);
+
+      provider.destroy();
+    }, 30000);
+
+    it.skipIf(!apiKey)('should stream response', async () => {
+      const provider = new ZaiProvider({
+        config: {
+          provider: 'zai',
+          apiKey,
+          apiUrl: 'https://api.z.ai/api/coding/paas/v4',
+          model: 'glm-5',
+          maxTokens: 100,
+        },
+        logger: consoleLogger,
+      });
+
+      await provider.initialize();
+
+      const chunks: string[] = [];
+      for await (const event of provider.streamComplete(createTestRequest())) {
+        if (event.type === 'content' && event.delta?.content) {
+          chunks.push(event.delta.content);
+          process.stdout.write(event.delta.content);
+        }
+      }
+      console.log('\n');
+
+      expect(chunks.length).toBeGreaterThan(0);
+
+      provider.destroy();
+    }, 30000);
+  });
+
+  describe('DeepSeek Provider', () => {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+
+    it.skipIf(!apiKey)('should complete request with deepseek-chat', async () => {
+      const provider = new DeepSeekProvider({
+        config: {
+          provider: 'deepseek',
+          apiKey,
+          apiUrl: 'https://api.deepseek.com/anthropic/v1',
+          model: 'deepseek-chat',
+          maxTokens: 100,
+        },
+        logger: consoleLogger,
+      });
+
+      await provider.initialize();
+
+      const response = await provider.complete(createTestRequest());
+
+      console.log('DeepSeek Response:', response.content);
+      console.log('Usage:', response.usage);
+      console.log('Cost:', response.cost);
+
+      expect(response.content).toBeTruthy();
+      expect(response.provider).toBe('deepseek');
+      expect(response.usage.totalTokens).toBeGreaterThan(0);
+
+      provider.destroy();
+    }, 30000);
+
+    it.skipIf(!apiKey)('should stream response', async () => {
+      const provider = new DeepSeekProvider({
+        config: {
+          provider: 'deepseek',
+          apiKey,
+          apiUrl: 'https://api.deepseek.com/anthropic/v1',
+          model: 'deepseek-chat',
+          maxTokens: 100,
+        },
+        logger: consoleLogger,
+      });
+
+      await provider.initialize();
+
+      const chunks: string[] = [];
+      for await (const event of provider.streamComplete(createTestRequest())) {
+        if (event.type === 'content' && event.delta?.content) {
+          chunks.push(event.delta.content);
+          process.stdout.write(event.delta.content);
+        }
+      }
+      console.log('\n');
+
+      expect(chunks.length).toBeGreaterThan(0);
+
+      provider.destroy();
+    }, 30000);
+  });
+
+  describe('MiniMax Provider', () => {
+    const apiKey = process.env.MINIMAX_API_KEY;
+
+    it.skipIf(!apiKey)('should complete request with MiniMax-M2.7', async () => {
+      const provider = new MiniMaxProvider({
+        config: {
+          provider: 'minimax',
+          apiKey,
+          apiUrl: 'https://api.minimax.io/anthropic/v1',
+          model: 'MiniMax-M2.7',
+          maxTokens: 100,
+        },
+        logger: consoleLogger,
+      });
+
+      await provider.initialize();
+
+      const response = await provider.complete(createTestRequest());
+
+      console.log('MiniMax Response:', response.content);
+      console.log('Usage:', response.usage);
+      console.log('Cost:', response.cost);
+
+      expect(response.content).toBeTruthy();
+      expect(response.provider).toBe('minimax');
+      expect(response.usage.totalTokens).toBeGreaterThan(0);
+
+      provider.destroy();
+    }, 30000);
+
+    it.skipIf(!apiKey)('should stream response', async () => {
+      const provider = new MiniMaxProvider({
+        config: {
+          provider: 'minimax',
+          apiKey,
+          apiUrl: 'https://api.minimax.io/anthropic/v1',
+          model: 'MiniMax-M2.7',
+          maxTokens: 100,
+        },
+        logger: consoleLogger,
+      });
+
+      await provider.initialize();
+
+      const chunks: string[] = [];
+      for await (const event of provider.streamComplete(createTestRequest())) {
+        if (event.type === 'content' && event.delta?.content) {
+          chunks.push(event.delta.content);
+          process.stdout.write(event.delta.content);
+        }
+      }
+      console.log('\n');
+
+      expect(chunks.length).toBeGreaterThan(0);
+
+      provider.destroy();
+    }, 30000);
+  });
+
   describe('Provider Manager', () => {
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
     const googleKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const zaiKey = process.env.ZAI_API_KEY;
+    const minimaxKey = process.env.MINIMAX_API_KEY;
+    const deepseekKey = process.env.DEEPSEEK_API_KEY;
 
-    it.skipIf(!anthropicKey && !googleKey)('should manage multiple providers with failover', async () => {
+    it.skipIf(!anthropicKey && !googleKey && !zaiKey && !minimaxKey && !deepseekKey)('should manage multiple providers with failover', async () => {
       const providers: LLMProviderConfig[] = [];
 
       if (anthropicKey) {
@@ -293,6 +475,36 @@ describe('Provider Integration Tests', () => {
         });
       }
 
+      if (zaiKey) {
+        providers.push({
+          provider: 'zai',
+          apiKey: zaiKey,
+          apiUrl: 'https://api.z.ai/api/coding/paas/v4',
+          model: 'glm-5',
+          maxTokens: 100,
+        });
+      }
+
+      if (minimaxKey) {
+        providers.push({
+          provider: 'minimax',
+          apiKey: minimaxKey,
+          apiUrl: 'https://api.minimax.io/anthropic/v1',
+          model: 'MiniMax-M2.7',
+          maxTokens: 100,
+        });
+      }
+
+      if (deepseekKey) {
+        providers.push({
+          provider: 'deepseek',
+          apiKey: deepseekKey,
+          apiUrl: 'https://api.deepseek.com/anthropic/v1',
+          model: 'deepseek-chat',
+          maxTokens: 100,
+        });
+      }
+
       const config: ProviderManagerConfig = {
         providers,
         loadBalancing: {
@@ -301,7 +513,8 @@ describe('Provider Integration Tests', () => {
         },
         fallback: {
           enabled: true,
-          maxAttempts: 2,
+          maxAttempts: 3,
+          fallbackOrder: ['zai', 'minimax', 'deepseek', 'anthropic'],
         },
         cache: {
           enabled: true,

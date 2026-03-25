@@ -1,0 +1,24 @@
+{
+  "name": "beads-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for beads issue tracker - compatible with ruflo/claude-flow task interface",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "beads-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.27.1"
+  },
+  "keywords": [
+    "mcp",
+    "beads",
+    "issue-tracker",
+    "ruflo",
+    "claude-flow"
+  ],
+  "license": "MIT"
+}

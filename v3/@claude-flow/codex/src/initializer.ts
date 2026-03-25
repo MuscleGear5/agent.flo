@@ -412,7 +412,7 @@ web_search = "live"
 
 # Environment-specific settings
 # [env]
-# ANTHROPIC_API_KEY = "your-local-key"
+# ZAI_API_KEY = "your-local-key"
 `;
   }
 

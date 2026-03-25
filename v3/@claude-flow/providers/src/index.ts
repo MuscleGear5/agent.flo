@@ -35,6 +35,9 @@ export { GoogleProvider } from './google-provider.js';
 export { CohereProvider } from './cohere-provider.js';
 export { OllamaProvider } from './ollama-provider.js';
 export { RuVectorProvider } from './ruvector-provider.js';
+export { DeepSeekProvider } from './deepseek-provider.js';
+export { MiniMaxProvider } from './minimax-provider.js';
+export { ZaiProvider } from './zai-provider.js';
 
 // Export provider manager
 export { ProviderManager, createProviderManager } from './provider-manager.js';

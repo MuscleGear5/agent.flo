@@ -64,6 +64,12 @@ const runCommand: Command = {
       default: 30
     },
     {
+      name: 'format',
+      description: 'Output format (json, table)',
+      type: 'string',
+      default: 'table'
+    },
+    {
       name: 'dry-run',
       short: 'd',
       description: 'Validate without executing',
@@ -210,6 +216,12 @@ const validateCommand: Command = {
       description: 'Strict validation mode',
       type: 'boolean',
       default: false
+    },
+    {
+      name: 'format',
+      description: 'Output format (json, table)',
+      type: 'string',
+      default: 'table'
     }
   ],
   examples: [
@@ -318,6 +330,12 @@ const listCommand: Command = {
       description: 'Maximum results',
       type: 'number',
       default: 10
+    },
+    {
+      name: 'format',
+      description: 'Output format (json, table)',
+      type: 'string',
+      default: 'table'
     }
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
@@ -391,6 +409,12 @@ const statusCommand: Command = {
       description: 'Watch for changes',
       type: 'boolean',
       default: false
+    },
+    {
+      name: 'format',
+      description: 'Output format (json, table)',
+      type: 'string',
+      default: 'table'
     }
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
@@ -532,6 +556,9 @@ const templateCommand: Command = {
     {
       name: 'list',
       description: 'List available templates',
+      options: [
+        { name: 'format', description: 'Output format (json, table)', type: 'string', default: 'table' }
+      ],
       action: async (ctx: CommandContext): Promise<CommandResult> => {
         if (ctx.flags.format === 'json') {
           output.printJson(WORKFLOW_TEMPLATES);
@@ -557,6 +584,9 @@ const templateCommand: Command = {
     {
       name: 'show',
       description: 'Show template details',
+      options: [
+        { name: 'format', description: 'Output format (json, table)', type: 'string', default: 'table' }
+      ],
       action: async (ctx: CommandContext): Promise<CommandResult> => {
         const templateName = ctx.args[0];
 

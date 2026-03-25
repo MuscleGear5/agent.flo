@@ -183,7 +183,7 @@ export class RuVectorProvider extends BaseProvider {
 
     // Try to dynamically import @ruvector/ruvllm native module
     try {
-      this.ruvllm = await import('@ruvector/ruvllm').catch(() => null);
+      this.ruvllm = await import('@ruvector/ruvllm' as string).catch(() => null);
       if (this.ruvllm) {
         this.logger.info('RuVector ruvLLM native module loaded');
         this.ruvllmAvailable = true;

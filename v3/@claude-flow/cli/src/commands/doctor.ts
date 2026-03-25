@@ -149,7 +149,7 @@ async function checkMemoryDatabase(): Promise<HealthCheck> {
 
 // Check API keys
 async function checkApiKeys(): Promise<HealthCheck> {
-  const keys = ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'OPENAI_API_KEY'];
+  const keys = ['ZAI_API_KEY', 'DEEPSEEK_API_KEY', 'MINIMAX_API_KEY'];
   const found: string[] = [];
 
   for (const key of keys) {
@@ -161,14 +161,14 @@ async function checkApiKeys(): Promise<HealthCheck> {
   // Detect Claude Code environment — API keys are managed internally
   const inClaudeCode = !!(process.env.CLAUDE_CODE || process.env.CLAUDE_PROJECT_DIR || process.env.MCP_SESSION_ID);
 
-  if (found.includes('ANTHROPIC_API_KEY') || found.includes('CLAUDE_API_KEY')) {
+  if (found.includes('ZAI_API_KEY')) {
     return { name: 'API Keys', status: 'pass', message: `Found: ${found.join(', ')}` };
   } else if (inClaudeCode) {
     return { name: 'API Keys', status: 'pass', message: 'Claude Code (managed internally)' };
   } else if (found.length > 0) {
-    return { name: 'API Keys', status: 'warn', message: `Found: ${found.join(', ')} (no Claude key)`, fix: 'export ANTHROPIC_API_KEY=your_key' };
+    return { name: 'API Keys', status: 'warn', message: `Found: ${found.join(', ')} (no ZAI key)`, fix: 'export ZAI_API_KEY=your_key' };
   } else {
-    return { name: 'API Keys', status: 'warn', message: 'No API keys found', fix: 'export ANTHROPIC_API_KEY=your_key' };
+    return { name: 'API Keys', status: 'warn', message: 'No API keys found', fix: 'export ZAI_API_KEY=your_key' };
   }
 }
 

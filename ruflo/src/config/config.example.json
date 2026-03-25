@@ -29,46 +29,45 @@
   },
   "models": [
     {
-      "name": "gemini-2.5-pro",
-      "displayName": "Gemini 2.5 Pro (Default)",
-      "description": "Google's most capable deep thinking model",
-      "provider": "gemini",
+      "name": "glm-5",
+      "displayName": "GLM-5 (Default)",
+      "description": "Z.AI's most capable coding model",
+      "provider": "zai",
       "supportsTools": true
     },
     {
-      "name": "gemini-2.5-flash",
-      "displayName": "Gemini 2.5 Flash",
-      "description": "Fast Google model with thinking",
-      "provider": "gemini",
+      "name": "glm-5-turbo",
+      "displayName": "GLM-5 Turbo",
+      "description": "Fast Z.AI model for routing and quick tasks",
+      "provider": "zai",
       "supportsTools": true
     },
     {
-      "name": "gpt-4.1",
-      "displayName": "GPT-4.1",
-      "description": "OpenAI's latest flagship model (2026)",
-      "provider": "openai",
-      "multimodal": true,
+      "name": "MiniMax-M2.7",
+      "displayName": "MiniMax M2.7",
+      "description": "MiniMax structured output model",
+      "provider": "minimax",
       "supportsTools": true
     },
     {
-      "name": "gpt-4.1-mini",
-      "displayName": "GPT-4.1 Mini",
-      "description": "Fast and affordable OpenAI model",
-      "provider": "openai",
+      "name": "deepseek-reasoner",
+      "displayName": "DeepSeek Reasoner",
+      "description": "DeepSeek deep reasoning model for complex tasks",
+      "provider": "deepseek",
       "supportsTools": true
     },
     {
-      "name": "o3-mini",
-      "displayName": "o3-mini (Reasoning)",
-      "description": "OpenAI reasoning model for complex tasks",
-      "provider": "openai",
+      "name": "deepseek-chat",
+      "displayName": "DeepSeek Chat",
+      "description": "Fast DeepSeek model for analytical reviews",
+      "provider": "deepseek",
       "supportsTools": true
     }
   ],
   "secrets": {
-    "openaiApiKey": "openai-api-key",
-    "googleApiKey": "google-api-key",
-    "openrouterApiKey": "openrouter-api-key"
+    "zaiApiKey": "zai-api-key",
+    "deepseekApiKey": "deepseek-api-key",
+    "minimaxApiKey": "minimax-api-key"
   },
   "tools": [],
   "cloudFunctions": {},

@@ -29,9 +29,9 @@ services:
       PORT: "3001"
       NODE_ENV: production
       # AI Provider Keys (required: at least one)
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ZAI_API_KEY: ${ZAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       # Backend service URLs (add your own)
       SEARCH_API_URL: ${SEARCH_API_URL:-}
       RESEARCH_API_URL: ${RESEARCH_API_URL:-}
@@ -49,8 +49,6 @@ services:
       MCP_GROUP_CLAUDE_CODE: ${MCP_GROUP_CLAUDE_CODE:-false}
       MCP_GROUP_GEMINI: ${MCP_GROUP_GEMINI:-false}
       MCP_GROUP_CODEX: ${MCP_GROUP_CODEX:-false}
-      # API keys for optional groups
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r => process.exit(r.ok ? 0 : 1))"]
       interval: 30s
@@ -97,7 +95,7 @@ services:
         ENABLE_DATA_EXPORT=true
         ALLOW_IFRAME=true
         OPENAI_BASE_URL=http://mcp-bridge:3001
-        OPENAI_API_KEY=${OPENAI_API_KEY:-sk-placeholder}
+        OPENAI_API_KEY=${ZAI_API_KEY:-sk-placeholder}
         MCP_SERVERS=[{"name":"Core Tools","url":"http://mcp-bridge:3001/mcp/core"},{"name":"Intelligence & Learning","url":"http://mcp-bridge:3001/mcp/intelligence"},{"name":"Agents & Orchestration","url":"http://mcp-bridge:3001/mcp/agents"},{"name":"Memory & Knowledge","url":"http://mcp-bridge:3001/mcp/memory"},{"name":"Dev Tools & Analysis","url":"http://mcp-bridge:3001/mcp/devtools"}]
         COOKIE_SECURE=${COOKIE_SECURE:-false}
         COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
