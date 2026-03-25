@@ -39,7 +39,7 @@ def tbl(cols, rows):
     for r in rows:
         for i, c in enumerate(r): W[i] = max(W[i], vl(str(c)))
     top = '┏' + '┳'.join('━' * (w + 2) for w in W) + '┓'
-    hdr = '┃' + '┃'.join(' ' + B + c.ljust(W[i]) + R + ' ' for i, c in enumerate(cols)) + '┃'
+    hdr = '┃' + '┃'.join(' ' + B + c + ' ' * (W[i] - vl(c)) + R + ' ' for i, c in enumerate(cols)) + '┃'
     sep = '┣' + '╋'.join('━' * (w + 2) for w in W) + '┫'
     bot = '┗' + '┻'.join('━' * (w + 2) for w in W) + '┛'
     def rs(r): return '┃' + '┃'.join(' ' + str(c) + ' ' * (W[i] - vl(str(c))) + ' ' for i, c in enumerate(r)) + '┃'
@@ -50,6 +50,10 @@ def sc(s):
     return SC.get(k, '') + s + R if SC.get(k) else s
 
 def pj(raw):
+    raw = raw.strip()
+    if not raw: return {}
+    try: return json.loads(raw)
+    except: pass
     try:
         i = raw.rindex('}'); n = 0
         for k in range(i, -1, -1):

@@ -135,6 +135,7 @@ typeset _main_query=""
 
 while true; do
 
+typeset CATEGORY=""
 _ai_label="ON"; [[ -f "$_RFL_SUGGEST_FLAG" ]] && _ai_label="OFF"
 _fzf_out=$(printf '%s\n' "${unified[@]}" | fzf \
   --print-query \

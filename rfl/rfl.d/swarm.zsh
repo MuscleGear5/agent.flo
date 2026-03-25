@@ -4,7 +4,7 @@
 # ── Real swarm start (bypasses broken CLI, uses MCP) ─────
 _rfl_swarm_start() {
   local objective="$1" types_csv="$2"
-  local -a agent_types=(${(s:,:)types_csv})
+  local -a agent_types=(${${(s:,:)types_csv}## })
   local agent_count=${#agent_types}
 
   echo ""

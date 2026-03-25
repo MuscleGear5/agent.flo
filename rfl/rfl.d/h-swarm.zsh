@@ -26,6 +26,7 @@ _rfl_run_swarm() {
         _rfl_spin "Loading tasks..." ruflo mcp exec --tool task_list; } | python3 -c "
 ${_RFL_PYLIB}
 parts=sys.stdin.read().split('---S---')
+if len(parts) < 3: parts += ['{}'] * (3 - len(parts))
 sw=pj(parts[0] if len(parts)>0 else '')
 pool=pj(parts[1] if len(parts)>1 else '')
 td=pj(parts[2] if len(parts)>2 else '')

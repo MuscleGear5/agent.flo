@@ -9,7 +9,7 @@ _rfl_run_hive2() {
       (( ${#aids} == 0 )) && { print -P "%F{196}[ERROR] No agent ID%f"; return 1; }
       local joined=0 out
       for aid in "${aids[@]}"; do
-        out=$(_rfl_spin "Joining $aid..." ruflo mcp exec --tool hive-mind_join -p "{\"agentId\":\"$aid\"}")
+        out=$(_rfl_spin "Joining $aid..." ruflo mcp exec --tool hive-mind_join -p "{\"agentId\":\"$(_rfl_json_esc "$aid")\"}")
         if [[ "$out" == *'"success"'*true* ]]; then
           ruflo mcp exec --tool coordination_node -p "{\"nodeId\":\"$aid\",\"role\":\"worker\"}" 2>&1 >/dev/null
           print -P "  %F{48}[+]%f %F{96}$aid%f joined hive + coordination"
@@ -28,7 +28,7 @@ _rfl_run_hive2() {
       (( ${#aids} == 0 )) && { print -P "%F{196}[ERROR] No agent ID%f"; return 1; }
       local left=0 out
       for aid in "${aids[@]}"; do
-        out=$(_rfl_spin "Removing $aid..." ruflo mcp exec --tool hive-mind_leave -p "{\"agentId\":\"$aid\"}")
+        out=$(_rfl_spin "Removing $aid..." ruflo mcp exec --tool hive-mind_leave -p "{\"agentId\":\"$(_rfl_json_esc "$aid")\"}")
         if [[ "$out" == *'"success"'*true* ]]; then
           print -P "  %F{48}[-]%f %F{96}$aid%f left hive"
           ((left++))

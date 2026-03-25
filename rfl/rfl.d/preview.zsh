@@ -5,7 +5,7 @@
 
 # Build preview cache (static, no ruflo calls needed)
 PREVIEW_DIR=$(mktemp -d)
-trap "rm -rf $PREVIEW_DIR; rm -f $_RFL_SUGGEST_FILE $_RFL_SUGGEST_DETAIL $_RFL_HISTORY_FILE; [[ -n \$_RFL_SUGGEST_PID ]] && kill \$_RFL_SUGGEST_PID 2>/dev/null" EXIT
+trap "rm -rf \"$PREVIEW_DIR\"; rm -f \"$_RFL_SUGGEST_FILE\" \"$_RFL_SUGGEST_DETAIL\" \"$_RFL_HISTORY_FILE\"; [[ -n \$_RFL_SUGGEST_PID ]] && kill \$_RFL_SUGGEST_PID 2>/dev/null" EXIT
 
 for cat in ${(ko)CATEGORIES}; do
   {

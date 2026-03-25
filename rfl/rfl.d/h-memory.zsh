@@ -14,16 +14,18 @@ _rfl_run_memory() {
       local _table
       _table=$(echo "$_ml_data" | python3 -c "
 ${_RFL_PYLIB}
-d=pj(sys.stdin.read())
-ml=d.get('memories', d.get('items', d.get('entries',[])))
-if ml:
-    print('Key|Value')
-    for m in ml:
-        if isinstance(m,dict):
-            k=m.get('key',m.get('id','?'))
-            v=str(m.get('value',m.get('content','')))[:80].replace('|',' ')
-            print(f'{k}|{v}')
-        else: print(f'{str(m)[:40]}|')
+try:
+  d=pj(sys.stdin.read())
+  ml=d.get('memories', d.get('items', d.get('entries',[])))
+  if ml:
+      print('Key|Value')
+      for m in ml:
+          if isinstance(m,dict):
+              k=m.get('key',m.get('id','?'))
+              v=str(m.get('value',m.get('content','')))[:80].replace('|',' ')
+              print(f'{k}|{v}')
+          else: print(f'{str(m)[:40]}|')
+except: pass
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
         echo "$_table" | gum table --separator '|' --border thick --print
@@ -46,18 +48,20 @@ if ml:
       local _table
       _table=$(echo "$_ms_data" | python3 -c "
 ${_RFL_PYLIB}
-d=pj(sys.stdin.read())
-rs=d.get('results', d.get('items', []))
-total=d.get('total',len(rs)); st=d.get('searchTime','')
-print(f'Results: {total}  ({st})')
-if rs:
-    print('Key|Value|Score')
-    for r in rs:
-        if isinstance(r,dict):
-            k=r.get('key',r.get('id','?'))
-            v=str(r.get('value',r.get('content','')))[:60].replace('|',' ')
-            s=r.get('score',r.get('similarity',''))
-            print(f'{k}|{v}|{s}')
+try:
+  d=pj(sys.stdin.read())
+  rs=d.get('results', d.get('items', []))
+  total=d.get('total',len(rs)); st=d.get('searchTime','')
+  print(f'Results: {total}  ({st})')
+  if rs:
+      print('Key|Value|Score')
+      for r in rs:
+          if isinstance(r,dict):
+              k=r.get('key',r.get('id','?'))
+              v=str(r.get('value',r.get('content','')))[:60].replace('|',' ')
+              s=r.get('score',r.get('similarity',''))
+              print(f'{k}|{v}|{s}')
+except: pass
 " 2>/dev/null)
       if [[ -n "$_table" ]]; then
         local header=$(echo "$_table" | head -1)

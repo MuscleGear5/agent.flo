@@ -56,21 +56,23 @@ except Exception as e: print(f'ERR: {e}',file=sys.stderr)
       _wst_out=$(_rfl_spin "Loading..." ruflo mcp exec --tool workflow_list)
       _table=$(echo "$_wst_out" | WID="$wid" python3 -c "
 ${_RFL_PYLIB}
-import os; wid=os.environ['WID']
-txt=sys.stdin.read(); d=pj(txt)
-items=d.get('workflows',d.get('items',[]))
-w=next((x for x in items if x.get('workflowId',x.get('id',''))==wid),None)
-if w:
-    print('Field|Value')
-    for k,v in w.items():
-        if v is None or v=='': continue
-        if isinstance(v,(dict,)): continue
-        if isinstance(v,list): v=','.join(str(x) for x in v)
-        s=str(v)
-        if k=='status':
-            c=SC.get(s.lower().split()[0] if s else '','')
-            s=c+s+R if c else s
-        print(f'{k}|{s}')
+try:
+  import os; wid=os.environ['WID']
+  txt=sys.stdin.read(); d=pj(txt)
+  items=d.get('workflows',d.get('items',[]))
+  w=next((x for x in items if x.get('workflowId',x.get('id',''))==wid),None)
+  if w:
+      print('Field|Value')
+      for k,v in w.items():
+          if v is None or v=='': continue
+          if isinstance(v,(dict,)): continue
+          if isinstance(v,list): v=','.join(str(x) for x in v)
+          s=str(v)
+          if k=='status':
+              c=SC.get(s.lower().split()[0] if s else '','')
+              s=c+s+R if c else s
+          print(f'{k}|{s}')
+except: pass
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
         echo "$_table" | gum table --separator '|' --border thick --print

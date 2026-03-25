@@ -13,8 +13,18 @@
 SCRIPT_DIR="${0:A:h}"
 RUFLO_PROJECT="$SCRIPT_DIR/ruflo"
 
+# ── Dependency checks ────────────────────────────────────────
+for _dep in jq curl gum; do
+  command -v $_dep &>/dev/null || { echo "Error: $_dep required but not found" >&2; exit 1; }
+done
+
 # ── API config ──────────────────────────────────────────────
-DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-$(grep 'DEEPSEEK_API_KEY=' ~/.keys 2>/dev/null | head -1 | sed 's/.*=//;s/^"//;s/"$//')}"
+DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-$(grep 'DEEPSEEK_API_KEY=' ~/.keys 2>/dev/null | head -1 | sed 's/.*DEEPSEEK_API_KEY=//; s/^["\x27]//; s/["\x27]$//')}"
+if [[ -z "$DEEPSEEK_KEY" ]]; then
+  echo "Error: DEEPSEEK_API_KEY not found in ~/.keys" >&2
+  echo "Ensure ~/.keys contains: DEEPSEEK_API_KEY=\"your-key\"" >&2
+  exit 1
+fi
 DEEPSEEK_URL="https://api.deepseek.com/chat/completions"
 
 # ── Color palette (matches neon theme) ──────────────────────
@@ -326,6 +336,13 @@ call_deepseek() {
     fi
     if ! jq empty "$response_file" 2>/dev/null; then
         dim "API error" >&2
+        rm -f "$response_file"
+        return 1
+    fi
+
+    if jq -e '.error' "$response_file" >/dev/null 2>&1; then
+        local errmsg=$(jq -r '.error.message // .error // "Unknown API error"' "$response_file")
+        dim "API error: $errmsg" >&2
         rm -f "$response_file"
         return 1
     fi
@@ -908,7 +925,12 @@ Only valid JSON, no markdown." \
             selected="${choices[$((num-1))]}"
         fi
 
-        local correct="${choices[$((answer_idx + 1))]}"
+        local -i correct_idx=$((answer_idx + 1))
+        if (( correct_idx < 1 || correct_idx > ${#choices[@]} )); then
+          dim "Quiz error: invalid answer index" >&2
+          return 1
+        fi
+        local correct="${choices[$correct_idx]}"
         if [[ "$selected" == "$correct" ]]; then
             bright $C_GREEN "Correct!"
             score=$((score + 1))

@@ -69,7 +69,7 @@ except: pass
 " 2>/dev/null)
       if [[ -n "$assignee" ]]; then
         print -P "%F{96}Assigning to $assignee...%f"
-        ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$assignee\"]}" 2>&1 >/dev/null
+        ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$(_rfl_json_esc "$assignee")\"]}" 2>&1 >/dev/null
         print -P "  %F{48}[+]%f Assigned to: $assignee"
       fi
       ruflo mcp exec --tool hive-mind_broadcast -p "{\"message\":\"task: $esc_desc\",\"taskId\":\"$tid\",\"type\":\"task\"}" 2>&1 >/dev/null

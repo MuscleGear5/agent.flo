@@ -85,7 +85,7 @@ for a in d.get('agents',[]):
         print(a.get('agentId',a.get('id',''))); break
 " 2>/dev/null)
         if [[ -n "$_idle_agent" ]]; then
-          ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$_idle_agent\"]}" 2>&1 >/dev/null
+          ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$(_rfl_json_esc "$_idle_agent")\"]}" 2>&1 >/dev/null
           print -P "  %F{48}[+]%f Assigned to: %F{96}$_idle_agent%f"
         fi
       else
@@ -123,7 +123,7 @@ except: pass
       fi
       [[ -z "$aid" ]] && { print -P "%F{196}[ERROR] No agents available%f"; return 1; }
       local _ta_out
-      _ta_out=$(_rfl_spin "Assigning task..." timeout 10 ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$aid\"]}")
+      _ta_out=$(_rfl_spin "Assigning task..." ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$(_rfl_json_esc "$aid")\"]}")
       if [[ "$_ta_out" == *'"assignedTo"'* && "$_ta_out" != *'"error"'* ]]; then
         print -P "%F{48}[+]%f %F{245}$tid%f -> %F{96}$aid%f"
       else

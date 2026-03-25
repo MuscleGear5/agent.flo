@@ -131,7 +131,7 @@ try:
   rows=[]
   for k in ('modelId','type','status','accuracy','epochs','trainedAt'):
     v=d.get(k,'')
-    if v not in (None,'',True):
+    if v not in (None,''):
       if isinstance(v,float): v=f'{v:.4f}'
       rows.append([k, sc(str(v))])
   if rows:
@@ -195,6 +195,88 @@ except Exception as e: print(f'  [error] {e}')
 " 2>/dev/null
       else
         echo "$_out"
+      fi
+      echo ""
+      ;;
+    benchmark)
+      echo ""
+      print -P "%BNeural Benchmark%b"
+      echo ""
+      local _out
+      _out=$(_rfl_spin "Benchmarking..." ruflo mcp exec --tool neural_benchmark -p "{}")
+      if [[ "$_out" == *'{'* ]]; then
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  txt=sys.stdin.read(); d=pj(txt)
+  rs=d.get('results',[])
+  if not rs:
+    print('  (no ready models to benchmark)')
+  else:
+    rows=[]
+    for r in rs:
+      mid=r.get('modelId','?')
+      if len(mid)>20: mid=mid[:8]+'..'+mid[-4:]
+      rows.append([mid, r.get('type',''), f\"{r.get('avgLatencyMs',0):.2f}ms\", f\"{r.get('throughput',0)} tok/s\", str(r.get('iterations',''))])
+    print(tbl(['Model','Type','Latency','Throughput','Iters'], rows))
+    print(f'  {d.get(\"total\",len(rs))} model(s) benchmarked')
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        echo "$_out"
+      fi
+      echo ""
+      ;;
+    export)
+      local model_id="${1//__RFL_SP__/ }"
+      model_id="${model_id//\"/}"
+      [[ -z "$model_id" ]] && { print -P "%F{196}[ERROR] No model ID provided%f"; return 1; }
+      local _out
+      _out=$(_rfl_spin "Exporting..." ruflo mcp exec --tool neural_export -p "{\"modelId\":\"$(_rfl_json_esc "$model_id")\"}")
+      if [[ "$_out" == *'"success"'*true* ]]; then
+        print -P "%F{48}[OK]%f Exported model %F{245}$model_id%f"
+        echo ""
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  txt=sys.stdin.read(); d=pj(txt)
+  ex=d.get('exported',{})
+  rows=[]
+  for k in ('id','name','type','status','accuracy','epochs','trainedAt'):
+    v=ex.get(k,'')
+    if v not in (None,'',True):
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        print -P "%F{196}[x] Export failed%f"; echo "$_out"
+      fi
+      echo ""
+      ;;
+    import)
+      local source="${1//__RFL_SP__/ }"
+      source="${source//\"/}"
+      [[ -z "$source" ]] && { print -P "%F{196}[ERROR] No model type provided%f"; return 1; }
+      local _out
+      _out=$(_rfl_spin "Importing..." ruflo mcp exec --tool neural_import -p "{\"modelType\":\"$(_rfl_json_esc "$source")\"}")
+      if [[ "$_out" == *'"success"'*true* ]]; then
+        echo ""
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  txt=sys.stdin.read(); d=pj(txt)
+  rows=[]
+  for k in ('modelId','type','status'):
+    v=d.get(k,'')
+    if v not in (None,'',True):
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        print -P "%F{196}[x] Import failed%f"; echo "$_out"
       fi
       echo ""
       ;;
