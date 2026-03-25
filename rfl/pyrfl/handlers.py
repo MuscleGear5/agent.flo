@@ -657,23 +657,27 @@ def _swarm_followup_actions(sub: str, result: dict) -> list[tuple[str, str, str,
             actions.append(("stop swarm", "swarm", "stop", sid))
 
     elif sub == "status":
-        # Refresh is always useful.
-        actions.append(("refresh", "swarm", "status", sid))
-        if swarm_status in ("running", "active"):
+        if swarm_status in ("no_swarm", "not_found", ""):
+            # No swarm exists — only option is to create one.
+            actions.append(("init swarm", "swarm", "init", {}))
+        elif swarm_status in ("running", "active"):
             actions.append(("coordinate task", "swarm", "coordinate", sid))
             actions.append(("scale", "swarm", "scale", sid))
             if not has_agents:
                 actions.append((_SPAWN_AGENTS_LABEL, "", "", sid))
+            actions.append(("refresh", "swarm", "status", sid))
             if swarm_id:
                 actions.append(("stop swarm", "swarm", "stop", sid))
         elif swarm_status in ("idle", "initialized"):
             actions.append((_SPAWN_AGENTS_LABEL, "", "", sid))
             actions.append(("coordinate task", "swarm", "coordinate", sid))
+            actions.append(("refresh", "swarm", "status", sid))
         elif swarm_status in ("stopped", "terminated", "error"):
             actions.append(("init new swarm", "swarm", "init", {}))
         else:
-            # Unknown — safe options only.
+            # Unknown but swarm exists — operational options.
             actions.append(("coordinate task", "swarm", "coordinate", sid))
+            actions.append(("refresh", "swarm", "status", sid))
             if swarm_id:
                 actions.append(("stop swarm", "swarm", "stop", sid))
 
@@ -763,12 +767,33 @@ def _handle_swarm_init(args: dict) -> dict | None:
 
 
 def _handle_swarm_start(args: dict) -> dict | None:
-    """Multi-step swarm start: objective -> multi-select types -> init -> spawn -> task."""
-    # 1. Prompt objective
-    objective = args.get("objective") or Prompt.ask("Swarm objective")
+    """Multi-step swarm start: pick task -> multi-select types -> init -> spawn."""
+    _NEW_TASK = "+ describe new task"
+
+    # 1. Pick existing task or describe a new one
+    objective = args.get("objective")
     if not objective:
-        ui.error("No objective provided")
-        return
+        result = mcp_exec("task_list")
+        tasks = result.get("tasks", [])
+        choices: list[str] = []
+        for t in tasks:
+            tid = t.get("taskId", t.get("id", "?"))
+            status = t.get("status", "?")
+            desc = str(t.get("description", ""))[:40]
+            choices.append(f"{tid}  [{status}]  {desc}")
+        choices.append(_NEW_TASK)
+        sel = ui.choose("Task for swarm", choices)
+        if not sel:
+            return None
+        if sel == _NEW_TASK:
+            objective = Prompt.ask("Task description")
+            if not objective:
+                return None
+        else:
+            objective = sel.split("]", 1)[-1].strip() if "]" in sel else sel
+    if not objective:
+        ui.error("No task provided")
+        return None
 
     # 2. Multi-select agent types
     AGENT_TYPES = [
