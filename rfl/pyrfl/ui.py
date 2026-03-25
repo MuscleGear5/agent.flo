@@ -341,39 +341,23 @@ def confirm(label: str, default: bool = False) -> bool:
     return Confirm.ask(label, default=default)
 
 
-def _fzf(args: list[str], choices_text: str) -> str:
-    """Run fzf after resetting the terminal to a sane state."""
-    # Rich spinners leave the tty in raw mode with mouse tracking.
-    # `stty sane` resets everything: canonical mode, echo, no mouse.
-    try:
-        with open("/dev/tty") as tty:
-            subprocess.run(["stty", "sane"], stdin=tty, check=False)
-    except OSError:
-        pass
-
-    proc = subprocess.Popen(
-        args,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=None,
-    )
-    stdout, _ = proc.communicate(input=choices_text.encode())
-    return stdout.decode().strip() if proc.returncode == 0 else ""
-
-
 def choose(label: str, choices: list[str]) -> str | None:
     """fzf selector — falls back to Rich numbered prompt."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            result = _fzf(
+            proc = subprocess.run(
                 ["fzf", "--no-sort",
                  f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
                  "--pointer=>", "--no-info"],
-                "\n".join(choices),
+                input="\n".join(choices),
+                stdout=subprocess.PIPE,
+                text=True,
             )
-            return result or None
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc.stdout.strip()
+            return None
         except Exception:
             pass
     # Fallback
@@ -397,17 +381,19 @@ def multi_choose(label: str, choices: list[str]) -> list[str]:
     """fzf multi-select — falls back to Rich comma-separated input."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            result = _fzf(
+            proc = subprocess.run(
                 ["fzf", "--multi", "--no-sort",
                  f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
                  "--pointer=>", "--marker=*", "--no-info",
                  "--header=  space toggle  │  enter confirm  │  esc cancel"],
-                "\n".join(choices),
+                input="\n".join(choices),
+                stdout=subprocess.PIPE,
+                text=True,
             )
-            if result:
-                return [ln for ln in result.split("\n") if ln]
+            if proc.returncode == 0 and proc.stdout.strip():
+                return [ln for ln in proc.stdout.strip().split("\n") if ln]
             return []
         except Exception:
             pass
