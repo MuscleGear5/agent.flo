@@ -230,8 +230,9 @@ def _smart_pick(param_name: str, label: str = "") -> str | None:
 def _prompt_params(cmd_def: dict) -> dict | None:
     """Interactively prompt for parameters with smart dynamic pickers.
 
-    ID-like params (agentId, taskId, sessionId, modelId, swarmId, claimId, key)
-    are auto-detected and presented as live selection pickers.
+    ID-like params (agentId, taskId, sessionId, modelId, swarmId, workflowId,
+    templateId, claimId, key) are auto-detected and presented as live selection
+    pickers.
     Non-ID params use standard text prompts.
 
     The FIRST parameter is required (empty = cancel).  Subsequent parameters
@@ -599,48 +600,46 @@ def _swarm_followup_actions(sub: str, result: dict) -> list[tuple[str, str, str,
     swarm_status = (result.get("status") or "").lower()
 
     if sub == "init":
-        actions.append(("swarm status", "swarm", "status", {}))
-        actions.append(("spawn agent", "agent", "spawn", {}))
         actions.append(("start swarm", "swarm", "start", {}))
-        actions.append(("agent list", "agent", "list", {}))
+        actions.append(("coordinate task", "swarm", "coordinate", {}))
+        actions.append(("swarm status", "swarm", "status", {}))
 
     elif sub == "start":
+        actions.append(("coordinate task", "swarm", "coordinate", {}))
         actions.append(("swarm status", "swarm", "status", {}))
-        actions.append(("agent list", "agent", "list", {}))
-        actions.append(("task list", "task", "list", {}))
+        actions.append(("scale", "swarm", "scale", {}))
         if swarm_id:
             actions.append(("stop swarm", "swarm", "stop", {"swarmId": swarm_id}))
 
     elif sub == "status":
         if swarm_status in ("running", "active"):
-            actions.append(("agent list", "agent", "list", {}))
-            actions.append(("task list", "task", "list", {}))
+            actions.append(("coordinate task", "swarm", "coordinate", {}))
             actions.append(("scale", "swarm", "scale", {}))
-            actions.append(("coordinate", "swarm", "coordinate", {}))
+            actions.append(("create task", "task", "create", {}))
             if swarm_id:
                 actions.append(("stop swarm", "swarm", "stop", {"swarmId": swarm_id}))
         elif swarm_status in ("idle", "initialized"):
             actions.append(("start swarm", "swarm", "start", {}))
-            actions.append(("spawn agent", "agent", "spawn", {}))
+            actions.append(("coordinate task", "swarm", "coordinate", {}))
         elif swarm_status in ("stopped", "terminated", "error"):
             actions.append(("init new swarm", "swarm", "init", {}))
         else:
-            # Unknown status — offer basics
-            actions.append(("agent list", "agent", "list", {}))
-            actions.append(("init new swarm", "swarm", "init", {}))
+            actions.append(("coordinate task", "swarm", "coordinate", {}))
+            actions.append(("scale", "swarm", "scale", {}))
+            actions.append(("swarm status", "swarm", "status", {}))
 
     elif sub == "stop":
         actions.append(("init new swarm", "swarm", "init", {}))
-        actions.append(("agent list", "agent", "list", {}))
+        actions.append(("start swarm", "swarm", "start", {}))
 
     elif sub == "scale":
         actions.append(("swarm status", "swarm", "status", {}))
-        actions.append(("agent list", "agent", "list", {}))
+        actions.append(("coordinate task", "swarm", "coordinate", {}))
 
     elif sub == "coordinate":
+        actions.append(("coordinate another", "swarm", "coordinate", {}))
         actions.append(("swarm status", "swarm", "status", {}))
-        actions.append(("task list", "task", "list", {}))
-        actions.append(("agent list", "agent", "list", {}))
+        actions.append(("scale", "swarm", "scale", {}))
 
     return actions
 
