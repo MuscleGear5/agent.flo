@@ -143,7 +143,7 @@ _fzf_out=$(printf '%s\n' "${unified[@]}" | fzf \
   --border=bold \
   --border-label=" Ruflo  Multi-agent orchestration " \
   --border-label-pos=3 \
-  --preview="$PREVIEW_DIR/unified_preview.sh {} $PREVIEW_DIR" \
+  --preview="'$PREVIEW_DIR/unified_preview.sh' {} '$PREVIEW_DIR'" \
   --preview-window=right:55%:border-left:wrap \
   --preview-label=" Preview " \
   --preview-label-pos=3 \
@@ -155,7 +155,7 @@ _fzf_out=$(printf '%s\n' "${unified[@]}" | fzf \
   --header-first \
   --pointer=">" \
   --marker="*" \
-  --bind "ctrl-s:execute-silent(if [ -f \"$_RFL_SUGGEST_FLAG\" ]; then rm -f \"$_RFL_SUGGEST_FLAG\"; else touch \"$_RFL_SUGGEST_FLAG\"; fi)")
+  --bind "ctrl-s:execute-silent(if [ -f '$_RFL_SUGGEST_FLAG' ]; then rm -f '$_RFL_SUGGEST_FLAG'; else touch '$_RFL_SUGGEST_FLAG'; fi)")
 _fzf_rc=$?
 
 # Line 1 = query typed, Line 2 = selected item (--print-query)
@@ -211,7 +211,7 @@ while true; do
     --border=bold \
     --border-label=" $CATEGORY " \
     --border-label-pos=3 \
-    --preview="$PREVIEW_DIR/cmd_preview.sh {1} {2}" \
+    --preview="'$PREVIEW_DIR/cmd_preview.sh' {1} {2}" \
     --preview-window=right:55%:border-left:wrap \
     --preview-label=" Help " \
     --preview-label-pos=3 \
@@ -221,7 +221,7 @@ while true; do
     --header="  type to search  │  ↑↓ navigate  │  enter select  │  esc back  │  ctrl-s: toggle AI" \
     --header-first \
     --pointer=">" \
-    --bind "ctrl-s:execute-silent(if [ -f \"$_RFL_SUGGEST_FLAG\" ]; then rm -f \"$_RFL_SUGGEST_FLAG\"; else touch \"$_RFL_SUGGEST_FLAG\"; fi)")
+    --bind "ctrl-s:execute-silent(if [ -f '$_RFL_SUGGEST_FLAG' ]; then rm -f '$_RFL_SUGGEST_FLAG'; else touch '$_RFL_SUGGEST_FLAG'; fi)")
   _cat_rc=$?
 
   _cat_query=$(echo "$_cat_out" | head -1)
