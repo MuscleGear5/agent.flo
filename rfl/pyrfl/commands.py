@@ -85,7 +85,7 @@ COMMANDS: dict[str, dict] = {
             "metrics": {"desc": "Agent performance metrics",   "tool": "system_metrics",  "params": ["agentId"]},
             "pool":    {"desc": "Agent pool info",             "tool": "agent_pool"},
             "health":  {"desc": "Agent health check",          "tool": "agent_health",    "params": ["agentId"]},
-            "logs":    {"desc": "Agent logs",                  "tool": "agent_status",    "params": ["agentId"]},
+            "logs":    {"desc": "Agent logs",                  "tool": "agent_status",    "params": ["agentId"]},  # no dedicated agent_logs tool; falls back to agent_status
         },
     },
     "swarm": {
@@ -102,7 +102,7 @@ COMMANDS: dict[str, dict] = {
     "memory": {
         "desc": "AgentDB memory + HNSW search",
         "subs": {
-            "init":      {"desc": "Initialize memory backend",  "tool": "memory_store"},
+            "init":      {"desc": "Initialize memory backend",  "tool": "memory_stats"},
             "store":     {"desc": "Store a memory entry",       "tool": "memory_store",    "params": ["key", "value", "namespace"]},
             "retrieve":  {"desc": "Retrieve a memory entry",    "tool": "memory_retrieve", "params": ["key", "namespace"]},
             "search":    {"desc": "Search memory (HNSW)",       "tool": "memory_search",   "params": ["query", "namespace", "limit"]},
@@ -110,10 +110,10 @@ COMMANDS: dict[str, dict] = {
             "delete":    {"desc": "Delete a memory entry",      "tool": "memory_delete",   "params": ["key", "namespace"]},
             "stats":     {"desc": "Memory statistics",          "tool": "memory_stats"},
             "configure": {"desc": "Configure memory backend",   "tool": "config_set",      "params": ["key", "value"]},
-            "cleanup":   {"desc": "Clean up stale entries",     "tool": "memory_list"},
+            "cleanup":   {"desc": "Clean up stale entries",     "tool": "memory_stats"},  # no memory_cleanup tool; use memory_stats
             "compress":  {"desc": "Compress memory store",      "tool": "neural_compress"},
-            "export":    {"desc": "Export memory data",         "tool": "config_export",   "params": ["path"]},
-            "import":    {"desc": "Import memory data",         "tool": "config_import",   "params": ["path"]},
+            "export":    {"desc": "Export memory data",         "tool": "config_export",   "params": ["path"]},  # no memory_export tool; config_export is closest
+            "import":    {"desc": "Import memory data",         "tool": "config_import",   "params": ["path"]},  # no memory_import tool; config_import is closest
         },
     },
     "task": {
@@ -123,7 +123,7 @@ COMMANDS: dict[str, dict] = {
             "list":     {"desc": "List all tasks",           "tool": "task_list"},
             "status":   {"desc": "Task status",              "tool": "task_status",   "params": ["taskId"]},
             "cancel":   {"desc": "Cancel a task",            "tool": "task_cancel",   "params": ["taskId"]},
-            "assign":   {"desc": "Assign task to agent(s)",  "tool": "task_assign",   "params": ["taskId", "agentIds"]},
+            "assign":   {"desc": "Assign task to agent(s)",  "tool": "task_assign",   "params": ["taskId", "agentId"]},
             "retry":    {"desc": "Retry a failed task",      "tool": "task_execute",  "params": ["taskId"]},
             "complete": {"desc": "Mark task complete",        "tool": "task_complete", "params": ["taskId"]},
         },
@@ -150,7 +150,7 @@ COMMANDS: dict[str, dict] = {
             "restart": {"desc": "Restart MCP server",           "tool": "mcp_status"},
             "tools":   {"desc": "List available MCP tools",     "tool": "mcp_status"},
             "toggle":  {"desc": "Toggle MCP tool on/off",       "tool": "config_set",   "params": ["tool", "enabled"]},
-            "exec":    {"desc": "Execute an MCP tool directly", "tool": "mcp_status",   "params": ["toolName", "params"]},
+            "exec":    {"desc": "Execute an MCP tool directly", "tool": "mcp_exec",     "params": ["toolName", "params"]},
             "logs":    {"desc": "MCP server logs",              "tool": "mcp_status"},
         },
     },
@@ -189,7 +189,7 @@ COMMANDS: dict[str, dict] = {
     "neural": {
         "desc": "Neural model training and inference",
         "subs": {
-            "train":     {"desc": "Train a neural model",    "tool": "neural_train",     "params": ["domain", "epochs"]},
+            "train":     {"desc": "Train a neural model",    "tool": "neural_train",     "params": ["type", "epochs", "batchSize", "learningRate"]},
             "status":    {"desc": "Training status",         "tool": "neural_status"},
             "patterns":  {"desc": "View learned patterns",   "tool": "neural_patterns",  "params": ["domain"]},
             "predict":   {"desc": "Make a prediction",       "tool": "neural_predict",   "params": ["input", "model"]},
@@ -245,12 +245,13 @@ COMMANDS: dict[str, dict] = {
         "desc": "Byzantine fault-tolerant consensus",
         "subs": {
             "init":            {"desc": "Initialize hive mind",      "tool": "hive-mind_init",      "params": ["topology"]},
+            "start":           {"desc": "Start hive mind (alias for init)", "tool": "hive-mind_init", "params": ["topology"]},
             "spawn":           {"desc": "Spawn hive mind node",      "tool": "hive-mind_spawn",     "params": ["nodeType", "count"]},
             "status":          {"desc": "Hive mind status",          "tool": "hive-mind_status"},
             "task":            {"desc": "Submit task to hive",       "tool": "hive-mind_task",      "params": ["description"]},
-            "join":            {"desc": "Join a hive mind cluster",  "tool": "hive-mind_join",      "params": ["clusterId"]},
-            "leave":           {"desc": "Leave hive mind cluster",   "tool": "hive-mind_leave",     "params": ["clusterId"]},
-            "consensus":       {"desc": "Run consensus protocol",    "tool": "hive-mind_consensus", "params": ["proposal"]},
+            "join":            {"desc": "Join a hive mind cluster",  "tool": "hive-mind_join",      "params": ["agentId"]},
+            "leave":           {"desc": "Leave hive mind cluster",   "tool": "hive-mind_leave",     "params": ["agentId"]},
+            "consensus":       {"desc": "Run consensus protocol",    "tool": "hive-mind_consensus", "params": ["topic"]},
             "broadcast":       {"desc": "Broadcast message to hive", "tool": "hive-mind_broadcast", "params": ["message"]},
             "memory":          {"desc": "Hive shared memory",        "tool": "hive-mind_memory"},
             "optimize-memory": {"desc": "Optimize hive memory",      "tool": "hive-mind_memory"},

@@ -1,7 +1,7 @@
 """Generic handler system that routes commands to MCP tools.
 
 The handler first checks CUSTOM_HANDLERS for commands that need special
-interactive treatment (e.g. agent spawn, swarm init).  Everything else goes
+interactive treatment (e.g. agent spawn, swarm start).  Everything else goes
 through the generic path: look up the MCP tool name in COMMANDS, optionally
 prompt for missing parameters, call mcp_exec, and auto-format the result.
 """
@@ -9,6 +9,8 @@ prompt for missing parameters, call mcp_exec, and auto-format the result.
 from __future__ import annotations
 
 import importlib
+import os
+import time
 from collections.abc import Callable
 
 _pkg = __name__.rsplit(".", 1)[0]
@@ -40,7 +42,7 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
     extra_args : list[str] | None
         Positional CLI args (legacy compat, converted to dict when possible).
     args : dict | None
-        Pre-built parameter dict — takes precedence over extra_args.
+        Pre-built parameter dict -- takes precedence over extra_args.
     """
     # Check for custom handler first
     handler_key = f"{cmd}_{sub}"
@@ -104,14 +106,104 @@ def _args_from_list(cmd: str, sub: str, extra_args: list[str] | None) -> dict:
 
 
 def _prompt_params(cmd_def: dict) -> dict | None:
-    """Interactively prompt for required parameters."""
+    """Interactively prompt for parameters.
+
+    The FIRST parameter is required (empty = cancel).  Subsequent parameters
+    are optional -- empty input skips them rather than cancelling.
+    """
     params: dict = {}
-    for p in cmd_def.get("params", []):
-        val = Prompt.ask(f"  {p}")
-        if not val:
-            return None
-        params[p] = val
+    param_list = cmd_def.get("params", [])
+    for i, p in enumerate(param_list):
+        if i == 0:
+            # First param is required
+            val = Prompt.ask(f"  {p}")
+            if not val:
+                return None
+            params[p] = val
+        else:
+            # Subsequent params are optional
+            val = Prompt.ask(f"  {p} (optional)", default="")
+            if val:
+                params[p] = val
     return params
+
+
+# ---------------------------------------------------------------------------
+# Dynamic ID pickers -- fetch live data from MCP and present selection
+# ---------------------------------------------------------------------------
+
+def _pick_agent(label: str = "Select agent") -> str | None:
+    """Fetch agent list via MCP, present picker, return selected agent ID."""
+    result = mcp_exec("agent_list")
+    agents = result.get("agents", [])
+    if not agents:
+        ui.warn("No agents found")
+        return None
+    choices: list[str] = []
+    for a in agents:
+        aid = a.get("agentId", a.get("id", "?"))
+        status = a.get("status", "?")
+        atype = a.get("agentType", a.get("type", "?"))
+        choices.append(f"{aid}  [{status}]  {atype}")
+    sel = ui.choose(label, choices)
+    if not sel:
+        return None
+    return sel.split()[0]  # Extract ID from "id  [status]  type"
+
+
+def _pick_task(label: str = "Select task") -> str | None:
+    """Fetch task list via MCP, present picker, return selected task ID."""
+    result = mcp_exec("task_list")
+    tasks = result.get("tasks", [])
+    if not tasks:
+        ui.warn("No tasks found")
+        return None
+    choices: list[str] = []
+    for t in tasks:
+        tid = t.get("taskId", t.get("id", "?"))
+        status = t.get("status", "?")
+        desc = str(t.get("description", ""))[:40]
+        choices.append(f"{tid}  [{status}]  {desc}")
+    sel = ui.choose(label, choices)
+    if not sel:
+        return None
+    return sel.split()[0]
+
+
+def _pick_session(label: str = "Select session") -> str | None:
+    """Fetch session list, present picker."""
+    result = mcp_exec("session_list")
+    sessions = result.get("sessions", [])
+    if not sessions:
+        ui.warn("No sessions found")
+        return None
+    choices: list[str] = []
+    for s in sessions:
+        sid = s.get("sessionId", s.get("id", "?"))
+        name = s.get("name", "")
+        status = s.get("status", "?")
+        choices.append(f"{sid}  [{status}]  {name}")
+    sel = ui.choose(label, choices)
+    if not sel:
+        return None
+    return sel.split()[0]
+
+
+def _pick_agents_multi(label: str = "Select agents") -> list[str]:
+    """Fetch agent list, present multi-select picker, return list of IDs."""
+    result = mcp_exec("agent_list")
+    agents = result.get("agents", [])
+    if not agents:
+        ui.warn("No agents found")
+        return []
+    choices: list[str] = []
+    for a in agents:
+        aid = a.get("agentId", a.get("id", "?"))
+        status = a.get("status", "?")
+        atype = a.get("agentType", a.get("type", "?"))
+        choices.append(f"{aid}  [{status}]  {atype}")
+    selected = ui.multi_choose(label, choices)
+    return [s.split()[0] for s in selected]
 
 
 # ---------------------------------------------------------------------------
@@ -126,23 +218,31 @@ _LIST_KEYS = (
     "checks", "tools", "environments", "deployments",
 )
 
+# Meta keys to filter out of list-table columns
+_META_KEYS = frozenset({"success", "raw", "error", "warning", "_extra"})
+
 
 def _auto_display(cmd: str, sub: str, result: dict):
     """Auto-format MCP result into Rich tables or key-value display."""
     ui.console.print()
 
-    # List results -> table
+    # Collect ALL list keys that have data (handle multiple lists in one result)
+    displayed = False
     for key in _LIST_KEYS:
         items = result.get(key)
         if isinstance(items, list) and items:
             if isinstance(items[0], dict):
-                cols = list(items[0].keys())[:6]  # Max 6 columns
+                # Filter meta keys from columns
+                cols = [c for c in items[0].keys() if c not in _META_KEYS][:6]
                 rows = [[str(item.get(c, ""))[:40] for c in cols] for item in items]
-                ui.show_table(f"{cmd} {sub}", cols, rows)
+                ui.show_table(f"{cmd} {sub} ({key})", cols, rows)
             else:
                 for item in items:
                     ui.console.print(f"  {item}")
-            return
+            displayed = True
+
+    if displayed:
+        return
 
     # Raw text output
     raw = result.get("raw", "")
@@ -160,8 +260,10 @@ def _auto_display(cmd: str, sub: str, result: dict):
 
 
 # ---------------------------------------------------------------------------
-# Custom handlers — commands that need interactive prompts or special logic
+# Custom handlers -- commands that need interactive prompts or special logic
 # ---------------------------------------------------------------------------
+
+# ── Swarm ──────────────────────────────────────────────────────────────────
 
 def _handle_swarm_init(args: dict):
     """Custom swarm init with topology selection."""
@@ -184,6 +286,82 @@ def _handle_swarm_init(args: dict):
     else:
         ui.error(result.get("error", "Swarm init failed"))
 
+
+def _handle_swarm_start(args: dict):
+    """Multi-step swarm start: objective -> multi-select types -> init -> spawn -> task."""
+    # 1. Prompt objective
+    objective = args.get("objective") or Prompt.ask("Swarm objective")
+    if not objective:
+        ui.error("No objective provided")
+        return
+
+    # 2. Multi-select agent types
+    AGENT_TYPES = [
+        "coder", "researcher", "tester", "reviewer", "architect",
+        "coordinator", "analyst", "optimizer", "security-architect",
+        "security-auditor", "memory-specialist", "swarm-specialist",
+        "performance-engineer", "core-architect", "test-architect",
+    ]
+    selected_types = args.get("types")
+    if selected_types and isinstance(selected_types, str):
+        selected_types = [t.strip() for t in selected_types.split(",")]
+    if not selected_types:
+        selected_types = ui.multi_choose("Select agent types", AGENT_TYPES)
+    if not selected_types:
+        ui.warn("No agent types selected")
+        return
+
+    agent_count = len(selected_types)
+
+    # 3. Initialize swarm
+    with ui.spin(f"Initializing swarm ({agent_count} agents)..."):
+        init_result = mcp_exec("swarm_init", {
+            "topology": "hierarchical-mesh",
+            "maxAgents": agent_count,
+            "strategy": "specialized",
+            "objective": objective,
+        })
+    swarm_id = init_result.get("swarmId", init_result.get("id", ""))
+    if not swarm_id:
+        ui.error(init_result.get("error", "Swarm init failed"))
+        return
+    ui.success(f"Swarm: {swarm_id}")
+
+    # 4. Spawn each agent type
+    tag = swarm_id.rsplit("-", 1)[-1] if "-" in swarm_id else swarm_id[:8]
+    spawned = 0
+    for atype in selected_types:
+        aid = f"swarm-{tag}-{atype}"
+        with ui.spin(f"Spawning {atype}..."):
+            spawn_result = mcp_exec("agent_spawn", {
+                "agentType": atype,
+                "agentId": aid,
+                "task": objective,
+            })
+        if spawn_result.get("success") or spawn_result.get("agentId"):
+            ui.success(f"{aid} ({atype})")
+            spawned += 1
+        else:
+            ui.error(f"{atype} spawn failed")
+
+    # 5. Create task for the objective
+    with ui.spin("Creating task..."):
+        task_result = mcp_exec("task_create", {
+            "type": "feature",
+            "description": objective,
+            "priority": "high",
+        })
+    tid = task_result.get("taskId", task_result.get("id", ""))
+    if tid:
+        ui.success(f"Task: {tid}")
+
+    ui.console.print()
+    ui.success(f"Swarm ready: {spawned}/{agent_count} agents deployed")
+    ui.info("  Monitor: rfl swarm status")
+    ui.info("  Agents:  rfl agent list")
+
+
+# ── Agent ──────────────────────────────────────────────────────────────────
 
 def _handle_agent_spawn(args: dict):
     """Custom agent spawn with type selection."""
@@ -212,6 +390,61 @@ def _handle_agent_spawn(args: dict):
         ui.error(result.get("error", "Spawn failed"))
 
 
+def _handle_agent_status(args: dict):
+    """Agent status with picker."""
+    aid = args.get("agentId") or _pick_agent("Agent status")
+    if not aid:
+        return
+    with ui.spin(f"Getting status for {aid}..."):
+        result = mcp_exec("agent_status", {"agentId": aid})
+    _auto_display("agent", "status", result)
+
+
+def _handle_agent_stop(args: dict):
+    """Agent stop with picker."""
+    aid = args.get("agentId") or _pick_agent("Stop agent")
+    if not aid:
+        return
+    with ui.spin(f"Stopping {aid}..."):
+        result = mcp_exec("agent_terminate", {"agentId": aid})
+    if result.get("success"):
+        ui.success(f"Agent {aid} stopped")
+    else:
+        ui.error(result.get("error", f"Failed to stop {aid}"))
+
+
+def _handle_agent_metrics(args: dict):
+    """Agent metrics with picker."""
+    aid = args.get("agentId") or _pick_agent("Agent metrics")
+    if not aid:
+        return
+    with ui.spin(f"Getting metrics for {aid}..."):
+        result = mcp_exec("system_metrics", {"agentId": aid})
+    _auto_display("agent", "metrics", result)
+
+
+def _handle_agent_logs(args: dict):
+    """Agent logs with picker."""
+    aid = args.get("agentId") or _pick_agent("Agent logs")
+    if not aid:
+        return
+    with ui.spin(f"Getting logs for {aid}..."):
+        result = mcp_exec("agent_status", {"agentId": aid})
+    _auto_display("agent", "logs", result)
+
+
+def _handle_agent_health(args: dict):
+    """Agent health with picker."""
+    aid = args.get("agentId") or _pick_agent("Agent health")
+    if not aid:
+        return
+    with ui.spin(f"Checking health for {aid}..."):
+        result = mcp_exec("agent_health", {"agentId": aid})
+    _auto_display("agent", "health", result)
+
+
+# ── Task ───────────────────────────────────────────────────────────────────
+
 def _handle_task_create(args: dict):
     """Custom task create with prompts."""
     TASK_TYPES = [
@@ -239,6 +472,122 @@ def _handle_task_create(args: dict):
     else:
         ui.error(result.get("error", "Create failed"))
 
+
+def _handle_task_status(args: dict):
+    """Task status with picker."""
+    tid = args.get("taskId") or _pick_task("Task status")
+    if not tid:
+        return
+    with ui.spin(f"Getting status for {tid}..."):
+        result = mcp_exec("task_status", {"taskId": tid})
+    _auto_display("task", "status", result)
+
+
+def _handle_task_cancel(args: dict):
+    """Task cancel with picker."""
+    tid = args.get("taskId") or _pick_task("Cancel task")
+    if not tid:
+        return
+    with ui.spin(f"Cancelling {tid}..."):
+        result = mcp_exec("task_cancel", {"taskId": tid})
+    if result.get("success"):
+        ui.success(f"Task {tid} cancelled")
+    else:
+        ui.error(result.get("error", f"Failed to cancel {tid}"))
+
+
+def _handle_task_retry(args: dict):
+    """Task retry with picker."""
+    tid = args.get("taskId") or _pick_task("Retry task")
+    if not tid:
+        return
+    with ui.spin(f"Retrying {tid}..."):
+        result = mcp_exec("task_execute", {"taskId": tid})
+    if result.get("success"):
+        ui.success(f"Task {tid} retried")
+    else:
+        ui.error(result.get("error", f"Failed to retry {tid}"))
+
+
+def _handle_task_complete(args: dict):
+    """Task complete with picker."""
+    tid = args.get("taskId") or _pick_task("Complete task")
+    if not tid:
+        return
+    with ui.spin(f"Completing {tid}..."):
+        result = mcp_exec("task_complete", {"taskId": tid})
+    if result.get("success"):
+        ui.success(f"Task {tid} completed")
+    else:
+        ui.error(result.get("error", f"Failed to complete {tid}"))
+
+
+def _handle_task_assign(args: dict):
+    """Task assign with picker for both task and agent. Sends agentIds as list."""
+    tid = args.get("taskId") or _pick_task("Assign task")
+    if not tid:
+        return
+    # Accept agentIds as list or string
+    agent_ids = args.get("agentIds")
+    if isinstance(agent_ids, str):
+        agent_ids = [agent_ids]
+    if not agent_ids:
+        aid = _pick_agent("Assign to agent")
+        if not aid:
+            return
+        agent_ids = [aid]
+    with ui.spin(f"Assigning {tid} to {', '.join(agent_ids)}..."):
+        result = mcp_exec("task_assign", {
+            "taskId": tid,
+            "agentIds": agent_ids,  # Always a list
+        })
+    if result.get("success"):
+        ui.success(f"Task {tid} assigned to {', '.join(agent_ids)}")
+    else:
+        ui.error(result.get("error", "Assign failed"))
+
+
+# ── Session ────────────────────────────────────────────────────────────────
+
+def _handle_session_restore(args: dict):
+    """Session restore with picker."""
+    sid = args.get("sessionId") or _pick_session("Restore session")
+    if not sid:
+        return
+    with ui.spin(f"Restoring session {sid}..."):
+        result = mcp_exec("session_restore", {"sessionId": sid})
+    if result.get("success"):
+        ui.success(f"Session {sid} restored")
+    else:
+        ui.error(result.get("error", f"Failed to restore {sid}"))
+
+
+def _handle_session_delete(args: dict):
+    """Session delete with picker."""
+    sid = args.get("sessionId") or _pick_session("Delete session")
+    if not sid:
+        return
+    if not Confirm.ask(f"Delete session {sid}?", default=False):
+        return
+    with ui.spin(f"Deleting session {sid}..."):
+        result = mcp_exec("session_delete", {"sessionId": sid})
+    if result.get("success"):
+        ui.success(f"Session {sid} deleted")
+    else:
+        ui.error(result.get("error", f"Failed to delete {sid}"))
+
+
+def _handle_session_export(args: dict):
+    """Session export with picker."""
+    sid = args.get("sessionId") or _pick_session("Export session")
+    if not sid:
+        return
+    with ui.spin(f"Exporting session {sid}..."):
+        result = mcp_exec("session_info", {"sessionId": sid})
+    _auto_display("session", "export", result)
+
+
+# ── Memory ─────────────────────────────────────────────────────────────────
 
 def _handle_memory_store(args: dict):
     """Custom memory store with prompts."""
@@ -279,61 +628,449 @@ def _handle_memory_search(args: dict):
     _auto_display("memory", "search", result)
 
 
+# ── Hive-Mind ──────────────────────────────────────────────────────────────
+
+def _hive_spawn_agent(atype: str) -> str | None:
+    """Spawn a single agent into the hive: agent_spawn + hive-mind_join +
+    coordination_node.  Returns the agent ID on success, None on failure.
+
+    Ported from _rfl_hive_spawn (swarm.zsh).
+    """
+    rand_hex = os.urandom(4).hex()
+    ts = int(time.time())
+    aid = f"hive-{atype}-{ts}-{rand_hex}"
+    with ui.spin(f"Spawning {atype}..."):
+        spawn_result = mcp_exec("agent_spawn", {
+            "agentType": atype,
+            "agentId": aid,
+        })
+    if spawn_result.get("success") or spawn_result.get("agentId"):
+        # Join hive
+        mcp_exec("hive-mind_join", {"agentId": aid})
+        # Register as worker in coordination
+        mcp_exec("coordination_node", {
+            "nodeId": aid,
+            "role": "worker",
+            "capabilities": [atype],
+        })
+        ui.success(f"{aid} ({atype})")
+        return aid
+    return None
+
+
 def _handle_hive_mind_init(args: dict):
-    """Custom hive-mind init with topology selection."""
+    """Full hive-mind setup: topology -> init -> spawn agents -> join ->
+    designate queen -> set coordination topology -> sync.
+
+    Ported from _rfl_hive_start (swarm.zsh).
+    """
+    # 1. Choose topology
     topology = args.get("topology") or ui.choose(
-        "Topology", ["mesh", "hierarchical", "ring", "star"],
+        "Topology", ["mesh", "hierarchical", "hierarchical-mesh", "ring", "star"],
     )
     if not topology:
         return
-    with ui.spin("Initializing hive mind..."):
+
+    # 2. Initialize hive-mind
+    with ui.spin(f"Initializing hive-mind ({topology})..."):
         result = mcp_exec("hive-mind_init", {"topology": topology})
-    if result.get("success") or result.get("hiveMindId"):
-        ui.success(f"Hive mind initialized ({topology})")
-        ui.show_kv("Hive Mind", result)
-    else:
-        ui.error(result.get("error", "Init failed"))
+    if not (result.get("success") or result.get("hiveMindId")):
+        ui.error(result.get("error", "Hive-mind init failed"))
+        return
+    ui.success(f"Hive-mind initialized ({topology})")
+
+    # 3. Multi-select agent types to spawn
+    AGENT_TYPES = [
+        "coder", "researcher", "tester", "reviewer", "architect",
+        "coordinator", "analyst", "optimizer",
+    ]
+    selected_types = ui.multi_choose("Spawn agents into hive?", AGENT_TYPES)
+    if not selected_types:
+        ui.info("Hive initialized, no agents. Use hive-mind spawn/join.")
+        return
+
+    # 4. Spawn each agent via _handle_hive_mind_spawn logic (spawn + join + coordination)
+    spawned = 0
+    queen_id = ""
+    agent_ids: list[str] = []
+    for atype in selected_types:
+        aid = _hive_spawn_agent(atype)
+        if aid:
+            agent_ids.append(aid)
+            spawned += 1
+            # First coordinator/architect becomes queen candidate
+            if not queen_id and atype in ("coordinator", "architect"):
+                queen_id = aid
+        else:
+            ui.error(f"{atype} spawn failed")
+
+    # 5. If no coordinator was picked, fallback: query agent_list for last hive- agent
+    if not queen_id and agent_ids:
+        queen_id = agent_ids[0]
+    if queen_id:
+        mcp_exec("coordination_node", {
+            "nodeId": queen_id,
+            "role": "queen",
+            "capabilities": ["coordinate", "assign", "monitor"],
+        })
+        ui.info(f"  Queen: {queen_id}")
+
+    # 6. Set coordination topology and sync
+    mcp_exec("coordination_topology", {
+        "topology": topology,
+        "queen": queen_id or "",
+    })
+    mcp_exec("coordination_sync", {"action": "sync"})
+
+    ui.console.print()
+    ui.success(f"Hive ready: {spawned} agents, queen assigned")
 
 
 def _handle_hive_mind_spawn(args: dict):
-    """Custom hive-mind spawn."""
+    """Full hive-mind spawn: choose type -> agent_spawn + hive-mind_join +
+    coordination_node for each agent.
+
+    Ported from _rfl_hive_spawn (swarm.zsh).
+    """
     AGENT_TYPES = [
         "coder", "researcher", "tester", "reviewer", "architect",
-        "coordinator", "analyst",
+        "coordinator", "analyst", "optimizer",
     ]
-    ntype = args.get("nodeType") or ui.choose("Node type", AGENT_TYPES)
+    ntype = args.get("nodeType") or args.get("agentType") or ui.choose(
+        "Agent type", AGENT_TYPES,
+    )
     if not ntype:
         return
-    count = args.get("count") or Prompt.ask("Count", default="1")
-    with ui.spin(f"Spawning {count} {ntype} node(s)..."):
-        result = mcp_exec("hive-mind_spawn", {
-            "nodeType": ntype,
-            "count": int(count),
-        })
-    if result.get("success") or result.get("nodes"):
-        ui.success(f"Spawned {count} {ntype} node(s)")
-    else:
-        ui.error(result.get("error", "Spawn failed"))
+    count_str = args.get("count") or Prompt.ask("Count", default="1")
+    count = int(count_str)
 
+    spawned = 0
+    for _ in range(count):
+        aid = _hive_spawn_agent(ntype)
+        if aid:
+            spawned += 1
+
+    if spawned:
+        ui.success(f"Spawned {spawned}/{count} {ntype} node(s) into hive")
+    else:
+        ui.error(f"All {count} {ntype} spawn(s) failed")
+
+
+def _handle_hive_mind_task(args: dict):
+    """Multi-step hive-mind task: create task -> find idle agent -> assign ->
+    broadcast -> orchestrate."""
+    # 1. Prompt description
+    desc = args.get("description") or Prompt.ask("Task description")
+    if not desc:
+        ui.error("No description provided")
+        return
+
+    # 2. Create task
+    with ui.spin("Creating task..."):
+        task_result = mcp_exec("task_create", {
+            "type": "feature",
+            "description": desc,
+            "priority": "high",
+        })
+    tid = task_result.get("taskId", task_result.get("id", ""))
+    if not tid:
+        ui.error(task_result.get("error", "Task creation failed"))
+        return
+    ui.success(f"Task: {tid}")
+
+    # 3. Find idle/active agent and assign
+    agent_result = mcp_exec("agent_list")
+    agents = agent_result.get("agents", [])
+    assignee = ""
+    for a in agents:
+        if a.get("status") in ("idle", "active"):
+            assignee = a.get("agentId", a.get("id", ""))
+            if assignee:
+                break
+    if assignee:
+        with ui.spin(f"Assigning to {assignee}..."):
+            mcp_exec("task_assign", {
+                "taskId": tid,
+                "agentIds": [assignee],  # List, not string
+            })
+        ui.success(f"Assigned to: {assignee}")
+
+    # 4. Broadcast to hive
+    mcp_exec("hive-mind_broadcast", {
+        "message": f"task: {desc}",
+        "taskId": tid,
+        "type": "task",
+    })
+    ui.success("Broadcast to hive")
+
+    # 5. Orchestrate
+    with ui.spin("Orchestrating..."):
+        orch_result = mcp_exec("coordination_orchestrate", {
+            "taskId": tid,
+            "strategy": "auto",
+            "description": desc,
+        })
+    if orch_result.get("success"):
+        ui.success("Orchestration started")
+    else:
+        ui.info("Orchestration queued")
+
+    ui.console.print()
+    ui.success(f"Task {tid} dispatched")
+    ui.info(f"  {desc}")
+
+
+def _handle_hive_mind_broadcast(args: dict):
+    """Multi-step broadcast: send message -> store in hive memory -> sync."""
+    msg = args.get("message") or Prompt.ask("Broadcast message")
+    if not msg:
+        ui.error("No message provided")
+        return
+
+    # 1. Broadcast to hive
+    with ui.spin("Broadcasting..."):
+        result = mcp_exec("hive-mind_broadcast", {"message": msg})
+    if not (result.get("success")):
+        ui.error(result.get("error", "Broadcast failed"))
+        return
+    ui.success("Broadcast sent to hive")
+
+    # 2. Store in hive memory
+    ts = int(time.time())
+    mcp_exec("hive-mind_memory", {
+        "action": "store",
+        "key": f"broadcast-{ts}",
+        "value": msg,
+    })
+
+    # 3. Sync coordination
+    mcp_exec("coordination_sync", {
+        "action": "broadcast",
+        "message": msg,
+    })
+    ui.success("Stored in hive memory + coordination synced")
+    ui.info(f"  {msg}")
+
+
+def _handle_hive_mind_join(args: dict):
+    """Multi-step join: multi-pick agents -> join each to hive + register
+    coordination node -> sync."""
+    agent_ids = args.get("agentIds")
+    if isinstance(agent_ids, str):
+        agent_ids = [a.strip() for a in agent_ids.split(",") if a.strip()]
+    if not agent_ids:
+        agent_ids = _pick_agents_multi("Join agents to hive")
+    if not agent_ids:
+        return
+
+    joined = 0
+    for aid in agent_ids:
+        with ui.spin(f"Joining {aid}..."):
+            result = mcp_exec("hive-mind_join", {"agentId": aid})
+        if result.get("success"):
+            mcp_exec("coordination_node", {"nodeId": aid, "role": "worker"})
+            ui.success(f"{aid} joined hive + coordination")
+            joined += 1
+        else:
+            ui.error(f"{aid} join failed")
+
+    if joined > 0:
+        mcp_exec("coordination_sync", {"action": "sync"})
+        ui.success(f"{joined} agent(s) joined hive, coordination synced")
+
+
+def _handle_hive_mind_leave(args: dict):
+    """Multi-pick agents to remove from hive."""
+    agent_ids = args.get("agentIds")
+    if isinstance(agent_ids, str):
+        agent_ids = [a.strip() for a in agent_ids.split(",") if a.strip()]
+    if not agent_ids:
+        agent_ids = _pick_agents_multi("Remove agents from hive")
+    if not agent_ids:
+        return
+
+    left = 0
+    for aid in agent_ids:
+        with ui.spin(f"Removing {aid}..."):
+            result = mcp_exec("hive-mind_leave", {"agentId": aid})
+        if result.get("success"):
+            ui.success(f"{aid} left hive")
+            left += 1
+        else:
+            ui.error(f"{aid} leave failed")
+
+    if left > 0:
+        ui.success(f"{left} agent(s) left hive")
+
+
+def _handle_hive_mind_status(args: dict):
+    """Multi-tool aggregation: hive-mind_status + agent_list, filtered to
+    hive agents only, displayed as KV table + agent list table.
+
+    Ported from h-hive.zsh status handler.
+    """
+    # 1. Fetch hive-mind status
+    with ui.spin("Loading hive..."):
+        hm = mcp_exec("hive-mind_status")
+    # 2. Fetch agent list
+    with ui.spin("Loading agents..."):
+        pool = mcp_exec("agent_list")
+
+    ui.console.print()
+
+    # 3. Display hive status as KV table
+    if hm:
+        kv: dict = {}
+        for key, label in [
+            ("swarmId", "Hive"), ("status", "Status"),
+            ("topology", "Topology"), ("agentCount", "Agents"),
+        ]:
+            val = hm.get(key, "")
+            if val is not None and val != "":
+                kv[label] = str(val)
+        if kv:
+            ui.show_kv("Hive-Mind Status", kv)
+            ui.console.print()
+
+    # 4. Display agents, filtering out unknown/worker ghosts
+    all_agents = pool.get("agents", [])
+    agents = [
+        a for a in all_agents
+        if not (a.get("status", "") == "unknown"
+                and a.get("agentType", a.get("type", "")) == "worker")
+    ]
+    if agents:
+        rows = [
+            [
+                str(a.get("status", "?")),
+                a.get("agentType", a.get("type", "?")),
+                a.get("agentId", a.get("id", "?")),
+            ]
+            for a in agents
+        ]
+        ui.show_table("Hive Agents", ["Status", "Type", "ID"], rows)
+    else:
+        ui.info("  (no agents)")
+
+
+def _handle_hive_mind_consensus(args: dict):
+    """Run consensus protocol on a topic and display Decision/Votes/Confidence.
+
+    Ported from h-hive2.zsh consensus handler.
+    """
+    topic = args.get("topic") or Prompt.ask("Consensus topic")
+    if not topic:
+        ui.error("No topic provided")
+        return
+
+    ui.info(f"Running consensus on: {topic}")
+    with ui.spin("Running consensus..."):
+        result = mcp_exec("hive-mind_consensus", {"topic": topic})
+
+    if not result:
+        ui.error("No response from consensus")
+        return
+
+    kv: dict = {}
+    decision = result.get("decision", result.get("result", "pending"))
+    kv["Decision"] = str(decision)
+    votes = result.get("votes", result.get("participants", "?"))
+    kv["Votes"] = str(votes)
+    confidence = result.get("confidence", result.get("agreement", ""))
+    if confidence:
+        kv["Confidence"] = str(confidence)
+
+    ui.show_kv("Consensus Result", kv)
+
+
+def _handle_hive_mind_memory(args: dict):
+    """List hive shared memory as Key/Value table.
+
+    Ported from h-hive2.zsh memory handler.
+    """
+    ui.console.print()
+    with ui.spin("Loading hive memory..."):
+        result = mcp_exec("hive-mind_memory", {"action": "list"})
+
+    if not result:
+        ui.info("  (empty)")
+        return
+
+    mems = result.get("memories", result.get("items", result.get("entries", [])))
+    if not mems:
+        ui.info("  (empty)")
+        return
+
+    rows: list[list[str]] = []
+    for m in mems:
+        if isinstance(m, dict):
+            k = m.get("key", m.get("id", "?"))
+            v = str(m.get("value", m.get("content", "")))[:80]
+            rows.append([k, v])
+        else:
+            rows.append([str(m), ""])
+
+    if rows:
+        ui.show_table("Hive Memory", ["Key", "Value"], rows)
+    else:
+        ui.info("  (empty)")
+
+
+def _handle_hive_mind_optimize_memory(args: dict):
+    """Optimize hive shared memory.
+
+    Ported from h-hive2.zsh optimize-memory handler.
+    """
+    with ui.spin("Optimizing hive memory..."):
+        result = mcp_exec("hive-mind_memory", {"action": "optimize"})
+    if result.get("success"):
+        ui.success("Hive memory optimized")
+    else:
+        ui.error(result.get("error", "Optimization failed"))
+
+
+def _handle_hive_mind_shutdown(args: dict):
+    """Shut down the hive-mind after user confirmation.
+
+    Ported from h-hive2.zsh shutdown handler.
+    """
+    if not ui.confirm("Shut down hive-mind?", default=False):
+        return
+    with ui.spin("Shutting down hive-mind..."):
+        result = mcp_exec("hive-mind_shutdown")
+    if result.get("success"):
+        ui.success("Hive-mind shut down")
+    else:
+        ui.error(result.get("error", "Shutdown failed"))
+
+
+# ── Neural ─────────────────────────────────────────────────────────────────
 
 def _handle_neural_train(args: dict):
-    """Custom neural train with prompts."""
-    domain = args.get("domain") or Prompt.ask("Domain")
-    if not domain:
-        ui.error("Domain required")
+    """Custom neural train with correct params: type, epochs, batchSize, learningRate."""
+    MODEL_TYPES = ["transformer", "moe", "classifier", "embedding"]
+    mtype = args.get("type") or ui.choose("Model type", MODEL_TYPES)
+    if not mtype:
         return
     epochs = args.get("epochs") or Prompt.ask("Epochs", default="10")
-    with ui.spin(f"Training on '{domain}' ({epochs} epochs)..."):
-        result = mcp_exec("neural_train", {
-            "domain": domain,
-            "epochs": int(epochs),
-        })
+    batch_size = args.get("batchSize") or Prompt.ask("Batch size", default="32")
+    lr = args.get("learningRate") or Prompt.ask("Learning rate", default="0.001")
+    params: dict = {
+        "type": mtype,
+        "epochs": int(epochs),
+        "batchSize": int(batch_size),
+        "learningRate": float(lr),
+    }
+    with ui.spin(f"Training {mtype} ({epochs} epochs)..."):
+        result = mcp_exec("neural_train", params)
     if result.get("success") or result.get("modelId"):
         ui.success(f"Training started: {result.get('modelId', 'n/a')}")
         ui.show_kv("Training", result)
     else:
         ui.error(result.get("error", "Training failed"))
 
+
+# ── Security ───────────────────────────────────────────────────────────────
 
 def _handle_security_scan(args: dict):
     """Custom security scan with target prompt."""
@@ -342,6 +1079,8 @@ def _handle_security_scan(args: dict):
         result = mcp_exec("aidefence_scan", {"target": target})
     _auto_display("security", "scan", result)
 
+
+# ── Embeddings ─────────────────────────────────────────────────────────────
 
 def _handle_embeddings_compare(args: dict):
     """Custom embeddings compare with two-text prompt."""
@@ -361,6 +1100,8 @@ def _handle_embeddings_compare(args: dict):
     _auto_display("embeddings", "compare", result)
 
 
+# ── Config ─────────────────────────────────────────────────────────────────
+
 def _handle_config_set(args: dict):
     """Custom config set with key/value prompt."""
     key = args.get("key") or Prompt.ask("Config key")
@@ -378,6 +1119,8 @@ def _handle_config_set(args: dict):
     else:
         ui.error(result.get("error", "Set failed"))
 
+
+# ── Hooks ──────────────────────────────────────────────────────────────────
 
 def _handle_hooks_route(args: dict):
     """Custom hooks route with task prompt."""
@@ -398,6 +1141,8 @@ def _handle_hooks_route(args: dict):
     else:
         _auto_display("hooks", "route", result)
 
+
+# ── Doctor ─────────────────────────────────────────────────────────────────
 
 def _handle_doctor_run(args: dict):
     """Run all health checks via system_health."""
@@ -421,25 +1166,61 @@ def _handle_doctor_run(args: dict):
 
 
 # ---------------------------------------------------------------------------
-# Handler registry — maps "cmd_sub" to custom handler function
+# Handler registry -- maps "cmd_sub" to custom handler function
 # ---------------------------------------------------------------------------
 
 CUSTOM_HANDLERS: dict[str, Callable[..., None]] = {
-    "swarm_init":        _handle_swarm_init,
-    "agent_spawn":       _handle_agent_spawn,
-    "task_create":       _handle_task_create,
-    "memory_store":      _handle_memory_store,
-    "memory_search":     _handle_memory_search,
-    "hive-mind_init":    _handle_hive_mind_init,
-    "hive-mind_spawn":   _handle_hive_mind_spawn,
-    "neural_train":      _handle_neural_train,
-    "security_scan":     _handle_security_scan,
-    "security_audit":    _handle_security_scan,   # Same handler
-    "embeddings_compare": _handle_embeddings_compare,
-    "config_set":        _handle_config_set,
-    "hooks_route":       _handle_hooks_route,
-    "hooks_coverage-route": _handle_hooks_route,   # Same handler
-    "hooks_model-route": _handle_hooks_route,      # Same handler
-    "doctor_run":        _handle_doctor_run,
-    "doctor_--fix":      _handle_doctor_run,       # Same handler
+    # Swarm
+    "swarm_init":              _handle_swarm_init,
+    "swarm_start":             _handle_swarm_start,
+    # Agent
+    "agent_spawn":             _handle_agent_spawn,
+    "agent_status":            _handle_agent_status,
+    "agent_stop":              _handle_agent_stop,
+    "agent_metrics":           _handle_agent_metrics,
+    "agent_logs":              _handle_agent_logs,
+    "agent_health":            _handle_agent_health,
+    # Task
+    "task_create":             _handle_task_create,
+    "task_status":             _handle_task_status,
+    "task_cancel":             _handle_task_cancel,
+    "task_retry":              _handle_task_retry,
+    "task_complete":           _handle_task_complete,
+    "task_assign":             _handle_task_assign,
+    # Session
+    "session_restore":         _handle_session_restore,
+    "session_delete":          _handle_session_delete,
+    "session_export":          _handle_session_export,
+    # Memory
+    "memory_store":            _handle_memory_store,
+    "memory_search":           _handle_memory_search,
+    # Hive-mind
+    "hive-mind_init":          _handle_hive_mind_init,
+    "hive-mind_start":         _handle_hive_mind_init,
+    "hive-mind_spawn":         _handle_hive_mind_spawn,
+    "hive-mind_status":        _handle_hive_mind_status,
+    "hive-mind_task":          _handle_hive_mind_task,
+    "hive-mind_broadcast":     _handle_hive_mind_broadcast,
+    "hive-mind_join":          _handle_hive_mind_join,
+    "hive-mind_leave":         _handle_hive_mind_leave,
+    "hive-mind_consensus":     _handle_hive_mind_consensus,
+    "hive-mind_memory":        _handle_hive_mind_memory,
+    "hive-mind_optimize-memory": _handle_hive_mind_optimize_memory,
+    "hive-mind_shutdown":      _handle_hive_mind_shutdown,
+    # Neural
+    "neural_train":            _handle_neural_train,
+    # Security
+    "security_scan":           _handle_security_scan,
+    "security_audit":          _handle_security_scan,
+    # Embeddings
+    "embeddings_compare":      _handle_embeddings_compare,
+    # Config
+    "config_set":              _handle_config_set,
+    # Hooks
+    "hooks_route":             _handle_hooks_route,
+    "hooks_coverage-route":    _handle_hooks_route,
+    "hooks_model-route":       _handle_hooks_route,
+    # Doctor
+    "doctor_run":              _handle_doctor_run,
+    "doctor_--fix":            _handle_doctor_run,
 }

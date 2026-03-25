@@ -168,11 +168,11 @@ def _fzf_main_loop(pdir: str) -> None:
         selected = result["selected"]
 
         if "[+]" in selected:
-            # Category selected — drill into submenu
-            cat_name = selected.lstrip("[+]").split()[0]
-            # Find actual category name (case-sensitive match)
+            # Category selected — extract name between [+] and first double-space
+            raw = selected.split("[+]", 1)[-1].split("  ")[0].strip()
+            cat_name = raw
             for cn in CATEGORIES:
-                if cn.startswith(cat_name) or cn.lower().startswith(cat_name.lower()):
+                if cn == raw or cn.lower() == raw.lower():
                     cat_name = cn
                     break
             _fzf_category(pdir, cat_name)
@@ -246,7 +246,7 @@ def _fzf_action(cmd: str, sub: str) -> str | None:
             return None
         return proc.stdout.strip()
     except Exception:
-        return "Run"
+        return None
 
 
 def _fzf_run_command(cmd: str, sub: str) -> None:
