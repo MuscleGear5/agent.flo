@@ -145,6 +145,44 @@ if a:
       fi
       echo ""
       ;;
+    metrics)
+      local aid="${1//\"/}"
+      echo ""
+      print -P "%BAgent Metrics%b"
+      echo ""
+      local _out
+      _out=$(_rfl_spin "Loading metrics..." ruflo mcp exec --tool coordination_metrics -p "{}")
+      if [[ "$_out" == *'{'* ]]; then
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  d=pj(sys.stdin.read())
+  rows=[]
+  for k,v in d.items():
+    if k not in ('success',) and v not in (None,''):
+      if isinstance(v,dict): v=', '.join(f'{sk}={sv}' for sk,sv in v.items())
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Metric','Value'], rows))
+  else: print('  (no data)')
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        echo "$_out"
+      fi
+      echo ""
+      ;;
+    logs)
+      local aid="${1//\"/}"
+      [[ -z "$aid" ]] && { print -P "%F{196}[ERROR] No agent ID%f"; return 1; }
+      echo ""
+      print -P "%BAgent Logs: $aid%b"
+      echo ""
+      local _out
+      _out=$(_rfl_spin "Loading logs..." ruflo agent logs "$aid")
+      echo "$_out" | _rfl_colorize
+      echo ""
+      ;;
     *) return 1 ;;
   esac
 }

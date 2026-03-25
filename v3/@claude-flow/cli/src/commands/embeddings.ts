@@ -1110,37 +1110,45 @@ const neuralCommand: Command = {
       config = {};
     }
 
-    // Auto-initialize neural config if missing (or explicit --init)
-    if (init || !config.neural) {
-      config.neural = {
+    // Defaults for neural substrate
+    const neuralDefaults = {
+      enabled: true,
+      driftThreshold,
+      decayRate,
+      consolidationInterval,
+      ruvector: {
         enabled: true,
-        driftThreshold,
-        decayRate,
-        consolidationInterval,
-        ruvector: {
-          enabled: true,
-          sona: true, // Self-Optimizing Neural Architecture
-          flashAttention: true,
-          ewcPlusPlus: true, // Elastic Weight Consolidation
-        },
-        features: {
-          semanticDrift: true,
-          memoryPhysics: true,
-          stateMachine: true,
-          swarmCoordination: true,
-          coherenceMonitor: true,
-        },
-        initializedAt: new Date().toISOString(),
-      };
+        sona: true,
+        flashAttention: true,
+        ewcPlusPlus: true,
+      },
+      features: {
+        semanticDrift: true,
+        memoryPhysics: true,
+        stateMachine: true,
+        swarmCoordination: true,
+        coherenceMonitor: true,
+      },
+      initializedAt: new Date().toISOString(),
+    };
 
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      if (init) {
-        output.printSuccess('Neural substrate initialized');
-        output.writeln();
-      }
+    // Backfill missing sub-objects from defaults
+    const existing = (config.neural || {}) as Record<string, unknown>;
+    config.neural = {
+      ...neuralDefaults,
+      ...existing,
+      ruvector: { ...neuralDefaults.ruvector, ...(existing.ruvector as Record<string, unknown> || {}) },
+      features: { ...neuralDefaults.features, ...(existing.features as Record<string, unknown> || {}) },
+    };
+
+    // Persist if anything was missing
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    if (init) {
+      output.printSuccess('Neural substrate initialized');
+      output.writeln();
     }
 
-    const neuralConfig = (config.neural || {}) as Record<string, unknown>;
+    const neuralConfig = config.neural as Record<string, unknown>;
     const features = (neuralConfig.features || {}) as Record<string, boolean>;
     const ruvector = (neuralConfig.ruvector || {}) as Record<string, boolean>;
 

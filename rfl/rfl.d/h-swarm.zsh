@@ -81,6 +81,47 @@ if tl:
         print -P "%F{196}[x] Stop failed%f"; echo "$_sst_out"
       fi
       ;;
+    scale)
+      local count="${1//\"/}"
+      [[ -z "$count" ]] && { print -P "%F{196}[ERROR] No agent count%f"; return 1; }
+      local _out
+      _out=$(_rfl_spin "Scaling to $count agents..." ruflo mcp exec --tool agent_pool -p "{\"action\":\"scale\",\"count\":$count}")
+      if [[ "$_out" == *'"success"'*true* ]]; then
+        print -P "%F{48}[OK]%f Swarm scaled to %F{96}$count%f agents"
+      else
+        print -P "%F{196}[x] Scale failed%f"; echo "$_out"
+      fi
+      ;;
+    coordinate)
+      local task="${*//\"/}"
+      task="${task//__RFL_SP__/ }"
+      [[ -z "$task" ]] && { print -P "%F{196}[ERROR] No task description%f"; return 1; }
+      echo ""
+      print -P "%BCoordinating%b"
+      echo ""
+      local _out
+      _out=$(_rfl_spin "Coordinating..." ruflo mcp exec --tool coordination_orchestrate -p "{\"task\":\"$(_rfl_json_esc "$task")\"}")
+      if [[ "$_out" == *'{'* ]]; then
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  d=pj(sys.stdin.read())
+  rows=[]
+  for k,v in d.items():
+    if k not in ('success',) and v not in (None,''):
+      if isinstance(v,dict): v=', '.join(f'{sk}={sv}' for sk,sv in v.items())
+      if isinstance(v,list): v=', '.join(str(x) for x in v[:5])
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+  else: print('  (no data)')
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        echo "$_out"
+      fi
+      echo ""
+      ;;
     *) return 1 ;;
   esac
 }
