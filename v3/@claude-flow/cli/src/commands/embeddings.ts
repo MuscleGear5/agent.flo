@@ -17,8 +17,10 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 
 // Dynamic imports for embeddings package
-async function getEmbeddings() {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getEmbeddings(): Promise<any> {
   try {
+    // @ts-expect-error — optional peer dep, resolved at runtime
     return await import('@claude-flow/embeddings');
   } catch {
     return null;
@@ -412,7 +414,6 @@ const collectionsCommand: Command = {
     { command: 'claude-flow embeddings collections -a stats', description: 'Show detailed stats' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
-    const action = ctx.flags.action as string || 'list';
     const dbPath = ctx.flags['db-path'] as string || '.swarm/memory.db';
 
     output.writeln();
@@ -453,9 +454,6 @@ const collectionsCommand: Command = {
         GROUP BY namespace
         ORDER BY total_entries DESC
       `);
-
-      // Get vector index info
-      const indexQuery = db.exec(`SELECT name, dimensions, hnsw_m FROM vector_indexes`);
 
       const collections: { name: string; vectors: string; total: string; dimensions: string; index: string; size: string }[] = [];
 
@@ -722,7 +720,7 @@ const initCommand: Command = {
         const embeddings = await getEmbeddings();
 
         if (embeddings) {
-          await embeddings.downloadEmbeddingModel(model, modelDir, (p) => {
+          await embeddings.downloadEmbeddingModel(model, modelDir, (p: { percent: number }) => {
             spinner.setText(`Downloading ${model}... ${p.percent.toFixed(0)}%`);
           });
         } else {
@@ -825,16 +823,18 @@ const providersCommand: Command = {
         { key: 'status', header: 'Status', width: 12 },
       ],
       data: [
-        { provider: 'OpenAI', model: 'text-embedding-3-small', dims: '1536', type: 'Cloud', status: output.success('Ready') },
-        { provider: 'OpenAI', model: 'text-embedding-3-large', dims: '3072', type: 'Cloud', status: output.success('Ready') },
         { provider: 'Transformers.js', model: 'all-MiniLM-L6-v2', dims: '384', type: 'Local', status: output.success('Ready') },
         { provider: 'Agentic Flow', model: 'ONNX optimized', dims: '384', type: 'Local', status: output.success('Ready') },
+        { provider: 'RVF', model: 'hash-based (sub-ms)', dims: '384', type: 'Local', status: output.success('Ready') },
+        { provider: 'Ollama', model: 'nomic-embed-text', dims: '768', type: 'Local', status: output.dim('Via --base-url') },
+        { provider: 'OpenAI-compat', model: 'any /v1/embeddings', dims: 'varies', type: 'API', status: output.dim('Via --base-url') },
         { provider: 'Mock', model: 'mock-embedding', dims: '384', type: 'Dev', status: output.dim('Dev only') },
       ],
     });
 
     output.writeln();
-    output.writeln(output.dim('Agentic Flow provider uses WASM SIMD for 75x faster inference'));
+    output.writeln(output.dim('Local-first: Transformers.js + Agentic Flow (WASM SIMD, 75x faster)'));
+    output.writeln(output.dim('Ollama/LM Studio: use -p openai --base-url http://localhost:11434/v1/embeddings'));
 
     return { success: true };
   },
@@ -889,7 +889,7 @@ const chunkCommand: Command = {
         { key: 'tokens', header: 'Tokens', width: 8 },
         { key: 'preview', header: 'Preview', width: 45 },
       ],
-      data: result.chunks.map((c, i) => ({
+      data: result.chunks.map((c: { length: number; tokenCount: number; text: string }, i: number) => ({
         idx: String(i + 1),
         length: String(c.length),
         tokens: String(c.tokenCount),
@@ -919,7 +919,6 @@ const normalizeCommand: Command = {
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const type = ctx.flags.type as string || 'l2';
-    const check = ctx.flags.check as boolean;
 
     output.writeln();
     output.writeln(output.bold('Embedding Normalization'));
@@ -972,7 +971,8 @@ const hyperbolicCommand: Command = {
 
     // Try to import hyperbolic functions from embeddings package
     try {
-      const hyperbolic = await import('@claude-flow/embeddings').then(m => m).catch(() => null);
+      // @ts-expect-error — optional peer dep, resolved at runtime
+      const hyperbolic = await import('@claude-flow/embeddings').then((m: any) => m).catch(() => null); // eslint-disable-line @typescript-eslint/no-explicit-any
 
       if (!hyperbolic || !hyperbolic.euclideanToPoincare) {
         output.printWarning('@claude-flow/embeddings hyperbolic module not available');
@@ -1010,13 +1010,13 @@ const hyperbolicCommand: Command = {
         case 'convert': {
           const vec = Array.isArray(input[0]) ? input[0] as number[] : input as number[];
           const rawResult = hyperbolic.euclideanToPoincare(vec, { curvature });
-          const result = Array.from(rawResult);
+          const result = Array.from(rawResult) as number[];
           output.writeln(output.success('Euclidean → Poincaré conversion:'));
           output.writeln();
-          output.writeln(`Input (Euclidean):  [${vec.slice(0, 6).map(v => v.toFixed(4)).join(', ')}${vec.length > 6 ? ', ...' : ''}]`);
-          output.writeln(`Output (Poincaré):  [${result.slice(0, 6).map(v => v.toFixed(4)).join(', ')}${result.length > 6 ? ', ...' : ''}]`);
+          output.writeln(`Input (Euclidean):  [${vec.slice(0, 6).map((v: number) => v.toFixed(4)).join(', ')}${vec.length > 6 ? ', ...' : ''}]`);
+          output.writeln(`Output (Poincaré):  [${result.slice(0, 6).map((v: number) => v.toFixed(4)).join(', ')}${result.length > 6 ? ', ...' : ''}]`);
           output.writeln(`Curvature: ${curvature}`);
-          output.writeln(`Norm: ${Math.sqrt(result.reduce((s, v) => s + v * v, 0)).toFixed(6)} (must be < 1)`);
+          output.writeln(`Norm: ${Math.sqrt(result.reduce((s: number, v: number) => s + v * v, 0)).toFixed(6)} (must be < 1)`);
           return { success: true, data: { result } };
         }
 
@@ -1042,11 +1042,11 @@ const hyperbolicCommand: Command = {
           }
           const vectors = input as number[][];
           const rawCentroid = hyperbolic.hyperbolicCentroid(vectors, { curvature });
-          const centroid = Array.from(rawCentroid);
+          const centroid = Array.from(rawCentroid) as number[];
           output.writeln(output.success('Hyperbolic centroid (Fréchet mean):'));
           output.writeln();
           output.writeln(`Input vectors: ${vectors.length}`);
-          output.writeln(`Centroid: [${centroid.slice(0, 6).map(v => v.toFixed(4)).join(', ')}${centroid.length > 6 ? ', ...' : ''}]`);
+          output.writeln(`Centroid: [${centroid.slice(0, 6).map((v: number) => v.toFixed(4)).join(', ')}${centroid.length > 6 ? ', ...' : ''}]`);
           return { success: true, data: { centroid } };
         }
 
@@ -1110,8 +1110,8 @@ const neuralCommand: Command = {
       config = {};
     }
 
-    if (init) {
-      // Initialize neural substrate configuration
+    // Auto-initialize neural config if missing (or explicit --init)
+    if (init || !config.neural) {
       config.neural = {
         enabled: true,
         driftThreshold,
@@ -1134,8 +1134,10 @@ const neuralCommand: Command = {
       };
 
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      output.printSuccess('Neural substrate initialized');
-      output.writeln();
+      if (init) {
+        output.printSuccess('Neural substrate initialized');
+        output.writeln();
+      }
     }
 
     const neuralConfig = (config.neural || {}) as Record<string, unknown>;
@@ -1248,7 +1250,7 @@ const modelsCommand: Command = {
 
       if (embeddings) {
         try {
-          await embeddings.downloadEmbeddingModel(download, '.models', (p) => {
+          await embeddings.downloadEmbeddingModel(download, '.models', (p: { percent: number }) => {
             spinner.setText(`Downloading ${download}... ${p.percent.toFixed(1)}%`);
           });
           spinner.succeed(`Downloaded ${download}`);
@@ -1443,7 +1445,6 @@ const warmupCommand: Command = {
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const runTest = ctx.flags.test !== false;
-    const background = ctx.flags.background === true;
 
     output.writeln();
     output.writeln(output.bold('Embedding Model Warmup'));
