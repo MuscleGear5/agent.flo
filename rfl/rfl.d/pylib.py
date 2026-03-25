@@ -7,9 +7,26 @@ GR = '\x1b[92m'; YL = '\x1b[93m'; RD = '\x1b[91m'
 OR = '\x1b[33m'; GY = '\x1b[90m'; CY = '\x1b[96m'
 
 SC = {
+    # Green: positive / active
     'active': GR, 'running': GR, 'available': GR, 'in_progress': GR,
-    'idle': YL, 'pending': OR, 'standby': OR, 'queued': OR,
-    'completed': GY, 'failed': RD, 'error': RD, 'unknown': RD
+    'loaded': GR, 'enabled': GR, 'ready': GR, 'healthy': GR,
+    'configured': GR, 'initialized': GR, 'connected': GR, 'installed': GR,
+    'online': GR, 'verified': GR, 'valid': GR, 'passed': GR,
+    'success': GR, 'open': GR, 'started': GR, 'synced': GR, 'optimized': GR,
+    # Yellow: idle / waiting
+    'idle': YL, 'waiting': YL, 'paused': YL, 'suspended': YL,
+    'degraded': YL, 'partial': YL, 'stale': YL, 'not': YL,
+    # Orange: pending / queued
+    'pending': OR, 'standby': OR, 'queued': OR,
+    'retrying': OR, 'migrating': OR, 'upgrading': OR,
+    # Grey: completed / done
+    'completed': GY, 'done': GY, 'skipped': GY, 'closed': GY,
+    'archived': GY, 'deprecated': GY,
+    # Red: errors / stopped
+    'failed': RD, 'error': RD, 'unknown': RD, 'stopped': RD,
+    'disabled': RD, 'critical': RD, 'disconnected': RD, 'offline': RD,
+    'invalid': RD, 'rejected': RD, 'denied': RD, 'expired': RD,
+    'broken': RD, 'timeout': RD, 'crashed': RD, 'missing': RD,
 }
 
 ansi = re.compile(r'\x1b\[[^m]+m')

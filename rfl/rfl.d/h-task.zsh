@@ -11,13 +11,7 @@ _rfl_run_task() {
       echo "$_tl_data" | python3 -c "
 ${_RFL_PYLIB}
 try:
-    txt=sys.stdin.read()
-    i=txt.rindex('}'); n=0
-    for p in range(i,-1,-1):
-        if txt[p]=='}': n+=1
-        elif txt[p]=='{': n-=1
-        if n==0: break
-    d=json.loads(txt[p:i+1])
+    txt=sys.stdin.read(); d=pj(txt)
     tasks=d.get('tasks',[])
     if not tasks: print('  (none)'); sys.exit(0)
     rows=[]
@@ -53,7 +47,7 @@ if t:
         print(f'{k}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(not found: $tid)%f"
       fi
@@ -77,7 +71,7 @@ if t:
       local tid
       tid=$(echo "$_tc_out" | grep -oP '"taskId"\s*:\s*"\K[^"]+' | head -1)
       if [[ -n "$tid" ]]; then
-        print -P "%F{48}[+]%f Task: %F{51}$tid%f (%F{245}$ttype%f)"
+        print -P "%F{48}[+]%f Task: %F{96}$tid%f (%F{245}$ttype%f)"
         print -P "  %F{245}$desc%f"
         # Auto-assign to first idle agent
         local _idle_agent _al_raw
@@ -91,7 +85,7 @@ for a in d.get('agents',[]):
 " 2>/dev/null)
         if [[ -n "$_idle_agent" ]]; then
           ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$_idle_agent\"]}" 2>&1 >/dev/null
-          print -P "  %F{48}[+]%f Assigned to: %F{51}$_idle_agent%f"
+          print -P "  %F{48}[+]%f Assigned to: %F{96}$_idle_agent%f"
         fi
       else
         print -P "%F{196}[x] Task creation failed%f"
@@ -117,14 +111,9 @@ for a in d.get('agents',[]):
         local _al_raw
         _al_raw=$(_rfl_spin "Finding agent..." ruflo mcp exec --tool agent_list)
         aid=$(echo "$_al_raw" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  d=pj(sys.stdin.read())
   for a in d.get('agents',[]):
     if a.get('status') in ('idle','active'):
       print(a.get('agentId',a.get('id',''))); break
@@ -135,7 +124,7 @@ except: pass
       local _ta_out
       _ta_out=$(_rfl_spin "Assigning task..." timeout 10 ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$aid\"]}")
       if [[ "$_ta_out" == *'"assignedTo"'* && "$_ta_out" != *'"error"'* ]]; then
-        print -P "%F{48}[+]%f %F{245}$tid%f -> %F{51}$aid%f"
+        print -P "%F{48}[+]%f %F{245}$tid%f -> %F{96}$aid%f"
       else
         print -P "%F{196}[x] Assign failed%f"
         echo "$_ta_out"

@@ -2,7 +2,7 @@
 # Sourced by rfl main script
 
 # ── API config for background suggestions ───────────────────
-_RFL_DEEPSEEK_KEY=$(grep 'DEEPSEEK_API_KEY=' ~/.keys 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'")
+_RFL_DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-}"
 _RFL_DEEPSEEK_URL="https://api.deepseek.com/chat/completions"
 _RFL_SUGGEST_FILE="/tmp/rfl-suggestions-$$.txt"
 _RFL_SUGGEST_DETAIL="/tmp/rfl-suggest-detail-$$.json"
@@ -82,11 +82,14 @@ Suggest 3-5 next steps using ONLY IDs from LIVE STATE above." \
         temperature: 0.3
       }' > "$rf.req"
 
+    local _curlrc=$(mktemp)
+    chmod 600 "$_curlrc"
+    printf 'header = "Authorization: Bearer %s"\n' "$_RFL_DEEPSEEK_KEY" > "$_curlrc"
     curl -s --max-time 25 "$_RFL_DEEPSEEK_URL" \
       -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $_RFL_DEEPSEEK_KEY" \
+      -K "$_curlrc" \
       -d @"$rf.req" > "$rf"
-    rm -f "$rf.req"
+    rm -f "$rf.req" "$_curlrc"
 
     if jq empty "$rf" 2>/dev/null; then
       local _raw_content
@@ -303,7 +306,7 @@ if not found:
 
     picked=$(printf '%s\n' "${valid_labels[@]}" | fzf \
       --prompt="suggest > " \
-      --border=rounded \
+      --border=thick \
       --border-label=" Suggested next steps " \
       --border-label-pos=3 \
       --preview="$_preview_cmd" \
@@ -313,7 +316,7 @@ if not found:
       --height=50% \
       --margin=1,2 \
       --no-sort \
-      --color="border:141,label:141,preview-border:51,preview-label:51,prompt:141,pointer:198,hl:51,hl+:198,header:245" \
+      --color="border:7,label:7:bold,preview-border:7,preview-label:7:bold,prompt:7:bold,pointer:48,hl:48,hl+:48:bold,header:245" \
       --header="  enter select  │  ? detail  │  esc back" \
       --header-first \
       --pointer=">" \

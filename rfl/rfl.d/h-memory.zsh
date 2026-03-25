@@ -7,8 +7,7 @@ _rfl_run_memory() {
 
     list)
       echo ""
-      gum style --border thick --border-foreground 7 --padding "0 2" \
-        --foreground 141 --bold "Memory"
+      print -P "%BMemory%b"
       echo ""
       local _ml_data
       _ml_data=$(_rfl_spin "Loading memory..." ruflo mcp exec --tool memory_list)
@@ -18,16 +17,16 @@ ${_RFL_PYLIB}
 d=pj(sys.stdin.read())
 ml=d.get('memories', d.get('items', d.get('entries',[])))
 if ml:
-    print('Key,Value')
+    print('Key|Value')
     for m in ml:
         if isinstance(m,dict):
             k=m.get('key',m.get('id','?'))
-            v=str(m.get('value',m.get('content','')))[:80].replace(',',';')
-            print(f'{k},{v}')
-        else: print(f'{str(m)[:40]},')
+            v=str(m.get('value',m.get('content','')))[:80].replace('|',' ')
+            print(f'{k}|{v}')
+        else: print(f'{str(m)[:40]}|')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator ',' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(empty)%f"
       fi
@@ -65,7 +64,7 @@ if rs:
         local body=$(echo "$_table" | tail -n +2)
         print -P "  %F{245}$header%f"
         if [[ -n "$body" && $(echo "$body" | wc -l) -gt 1 ]]; then
-          echo "$body" | gum table --separator '|' --border rounded --border.foreground 7 --print
+          echo "$body" | gum table --separator '|' --border thick --print
         else
           print -P "  %F{245}(no matches)%f"
         fi
@@ -89,7 +88,7 @@ if rs:
       local _ms_out
       _ms_out=$(_rfl_spin "Storing..." ruflo mcp exec --tool memory_store -p "{\"key\":\"$(_rfl_json_esc "$key")\",\"value\":\"$(_rfl_json_esc "$val")\"}")
       if [[ "$_ms_out" == *'"success"'*true* ]]; then
-        print -P "%F{48}[+]%f Stored: %F{51}$key%f"
+        print -P "%F{48}[+]%f Stored: %F{96}$key%f"
       else
         print -P "%F{196}[x] Store failed%f"; echo "$_ms_out"
       fi
@@ -106,7 +105,7 @@ if rs:
       _mr_out=$(_rfl_spin "Retrieving..." ruflo mcp exec --tool memory_retrieve -p "{\"key\":\"$(_rfl_json_esc "$key")\"}")
       if [[ "$_mr_out" == *'{'* ]]; then
         echo ""
-        gum style --border rounded --border-foreground 7 --padding "0 2" --foreground 141 "$key"
+        print -P "%B$key%b"
         echo "$_mr_out" | python3 -c "
 ${_RFL_PYLIB}
 d=pj(sys.stdin.read())
@@ -129,7 +128,7 @@ print(f'  {d.get(\"value\", d.get(\"content\", d.get(\"data\",\"\")))}')
       local _md_out
       _md_out=$(_rfl_spin "Deleting..." ruflo mcp exec --tool memory_delete -p "{\"key\":\"$(_rfl_json_esc "$key")\"}")
       if [[ "$_md_out" == *'"success"'*true* ]]; then
-        print -P "%F{48}[-]%f Deleted: %F{51}$key%f"
+        print -P "%F{48}[-]%f Deleted: %F{96}$key%f"
       else
         print -P "%F{196}[x] Delete failed%f"
       fi
@@ -139,7 +138,7 @@ print(f'  {d.get(\"value\", d.get(\"content\", d.get(\"data\",\"\")))}')
       local _out
       _out=$(_rfl_spin "Loading stats..." ruflo mcp exec --tool memory_stats -p "{}")
       echo ""
-      gum style --border rounded --border-foreground 7 --padding "0 2" --foreground 141 --bold "Memory Stats"
+      print -P "%BMemory Stats%b"
       if [[ "$_out" == *'{'* ]]; then
         echo "$_out" | python3 -c "
 ${_RFL_PYLIB}

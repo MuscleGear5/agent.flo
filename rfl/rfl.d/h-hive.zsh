@@ -17,8 +17,7 @@ _rfl_run_hive() {
       ;;
     status)
       echo ""
-      gum style --border thick --border-foreground 7 --padding "0 2" \
-        --foreground 141 --bold "Hive-Mind Status"
+      print -P "%BHive-Mind Status%b"
       echo ""
       { _rfl_spin "Loading hive..." ruflo mcp exec --tool hive-mind_status; echo "---S---"
         _rfl_spin "Loading agents..." ruflo mcp exec --tool agent_list; } | python3 -c "
@@ -58,16 +57,16 @@ else:
       agent_out=$(_rfl_spin "Finding agents..." ruflo mcp exec --tool agent_list)
       local assignee
       assignee=$(echo "$agent_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+  d=pj(sys.stdin.read())
   for a in d.get('agents',[]):
     if a.get('status') in ('idle','active'):
       print(a.get('agentId',a.get('id',''))); break
 except: pass
 " 2>/dev/null)
       if [[ -n "$assignee" ]]; then
-        print -P "%F{51}Assigning to $assignee...%f"
+        print -P "%F{96}Assigning to $assignee...%f"
         ruflo mcp exec --tool task_assign -p "{\"taskId\":\"$tid\",\"agentIds\":[\"$assignee\"]}" 2>&1 >/dev/null
         print -P "  %F{48}[+]%f Assigned to: $assignee"
       fi
@@ -81,7 +80,7 @@ except: pass
         print -P "  %F{245}[~]%f Orchestration queued"
       fi
       echo ""
-      gum style --border rounded --border-foreground 7 --padding "0 2" --foreground 48 "Task $tid dispatched"
+      print -P "%F{48}Task $tid dispatched%f"
       print -P "  %F{245}$desc%f"
       ;;
     join|leave|consensus|broadcast|memory|optimize-memory|shutdown)

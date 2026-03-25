@@ -108,20 +108,29 @@ _rfl_spin() {
   rm -f "$_sf"
 }
 
-# ── Colorize ruflo CLI output (neon palette) ──────────────
+# ── Colorize ruflo CLI output ─────────────────────────────
 _rfl_colorize() {
   python3 -c "
 import sys, re
+I=re.IGNORECASE
 R='\x1b[0m'; B='\x1b[1m'
 GR='\x1b[92m'; YL='\x1b[93m'; RD='\x1b[91m'
 CY='\x1b[96m'; GY='\x1b[90m'; OR='\x1b[33m'
 
 def colorize(line):
-    line = re.sub(r'\b(active|running|available)\b', GR+r'\g<0>'+R, line)
-    line = re.sub(r'\b(idle|standby)\b',             YL+r'\g<0>'+R, line)
-    line = re.sub(r'\b(pending|queued)\b',            OR+r'\g<0>'+R, line)
-    line = re.sub(r'\bcompleted\b',                   GY+r'completed'+R, line)
-    line = re.sub(r'\b(failed|error|unknown)\b',      RD+r'\g<0>'+R, line)
+    # Multi-word negations first (before single-word catches them)
+    line = re.sub(r'\bnot (loaded|running|available|configured|initialized|installed|connected)\b', YL+r'\g<0>'+R, line, flags=I)
+    # Green: positive / active states (skip if preceded by 'not ')
+    line = re.sub(r'(?<!not )\b(active|running|available|loaded|enabled|ready|healthy|configured|initialized|connected|installed|online|verified|valid|passed|success|open|started|synced|optimized)\b', GR+r'\g<0>'+R, line, flags=I)
+    # Yellow: idle / waiting states
+    line = re.sub(r'\b(idle|standby|waiting|paused|suspended|degraded|partial|stale)\b', YL+r'\g<0>'+R, line, flags=I)
+    # Orange: pending / queued
+    line = re.sub(r'\b(pending|queued|retrying|migrating|upgrading)\b', OR+r'\g<0>'+R, line, flags=I)
+    # Grey: completed / done / skipped
+    line = re.sub(r'\b(completed|done|skipped|closed|archived|deprecated)\b', GY+r'\g<0>'+R, line, flags=I)
+    # Red: errors / stopped / negative states
+    line = re.sub(r'\b(failed|error|unknown|stopped|disabled|critical|disconnected|offline|invalid|rejected|denied|expired|broken|timeout|crashed|missing)\b', RD+r'\g<0>'+R, line, flags=I)
+    # Tags
     line = re.sub(r'\[OK\]',    GR+'[OK]'+R,    line)
     line = re.sub(r'\[INFO\]',  CY+'[INFO]'+R,  line)
     line = re.sub(r'\[WARN\]',  OR+'[WARN]'+R,  line)

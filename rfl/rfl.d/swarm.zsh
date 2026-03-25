@@ -9,7 +9,7 @@ _rfl_swarm_start() {
 
   echo ""
   local init_out
-  init_out=$(_rfl_spin "Initializing swarm ($agent_count agents)..." ruflo mcp exec --tool swarm_init -p "{\"topology\":\"mesh\",\"maxAgents\":$agent_count,\"strategy\":\"specialized\"}")
+  init_out=$(_rfl_spin "Initializing swarm ($agent_count agents)..." ruflo mcp exec --tool swarm_init -p "{\"topology\":\"hierarchical-mesh\",\"maxAgents\":$agent_count,\"strategy\":\"specialized\"}")
   local swarm_id
   swarm_id=$(echo "$init_out" | grep -oP '"swarmId"\s*:\s*"\K[^"]+' | head -1)
   if [[ -z "$swarm_id" ]]; then
@@ -47,7 +47,7 @@ _rfl_swarm_start() {
 
 # ── Real hive-mind start (bypasses broken CLI, uses MCP) ──
 _rfl_hive_start() {
-  local topo="${1:-mesh}"
+  local topo="${1:-hierarchical-mesh}"
 
   echo ""
   local init_out
@@ -66,7 +66,7 @@ _rfl_hive_start() {
   local -a selected
   selected=($(gum choose --no-limit \
     --header="Spawn agents into hive? (space to toggle, enter to confirm)" \
-    --header.foreground=51 "${types[@]}"))
+    --header.foreground=7 "${types[@]}"))
 
   if (( ${#selected} > 0 )); then
     local spawned=0 queen_id=""
@@ -84,9 +84,9 @@ _rfl_hive_start() {
     # If no coordinator was picked, first agent is queen
     if [[ -z "$queen_id" && $spawned -gt 0 ]]; then
       queen_id=$(ruflo mcp exec --tool agent_list 2>&1 | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+  d=pj(sys.stdin.read())
   agents=[a for a in d.get('agents',[]) if a.get('agentId','').startswith('hive-')]
   if agents: print(agents[-1].get('agentId',''))
 except: pass
@@ -95,7 +95,7 @@ except: pass
     # Designate queen via coordination
     if [[ -n "$queen_id" ]]; then
       ruflo mcp exec --tool coordination_node -p "{\"nodeId\":\"$queen_id\",\"role\":\"queen\",\"capabilities\":[\"coordinate\",\"assign\",\"monitor\"]}" 2>&1 >/dev/null
-      print -P "%F{208}Queen:%f %F{51}$queen_id%f"
+      print -P "%F{208}Queen:%f %F{96}$queen_id%f"
     fi
     # Sync coordination topology
     ruflo mcp exec --tool coordination_topology -p "{\"topology\":\"$topo\",\"queen\":\"$queen_id\"}" 2>&1 >/dev/null

@@ -19,8 +19,7 @@ _rfl_run_swarm() {
       ;;
     status)
       echo ""
-      gum style --border thick --border-foreground 7 --padding "0 2" \
-        --foreground 48 --bold "Swarm Status"
+      print -P "%BSwarm Status%b"
       echo ""
       { _rfl_spin "Loading swarm..." ruflo mcp exec --tool swarm_status; echo "---S---"
         _rfl_spin "Loading agents..." ruflo mcp exec --tool agent_list;   echo "---S---"
@@ -63,7 +62,7 @@ if tl:
       local sid
       sid=$(echo "$_si_out" | grep -oP '"swarmId"\s*:\s*"\K[^"]+' | head -1)
       if [[ -n "$sid" ]]; then
-        print -P "%F{48}[OK]%f Swarm: %F{51}$sid%f (topology: $topo)"
+        print -P "%F{48}[OK]%f Swarm: %F{96}$sid%f (topology: $topo)"
       else
         print -P "%F{196}[x] Swarm init failed%f"; echo "$_si_out"
       fi

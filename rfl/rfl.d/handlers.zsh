@@ -11,6 +11,7 @@ source "${_hdir}/h-task.zsh"
 source "${_hdir}/h-session.zsh"
 source "${_hdir}/h-workflow.zsh"
 source "${_hdir}/h-memory.zsh"
+source "${_hdir}/h-neural.zsh"
 source "${_hdir}/h-misc.zsh"
 
 _rfl_run() {
@@ -23,6 +24,7 @@ _rfl_run() {
     session)   _rfl_run_session "$sub" "$@" ;;
     workflow)  _rfl_run_wf      "$sub" "$@" ;;
     memory)    _rfl_run_memory  "$sub" "$@" ;;
+    neural)    _rfl_run_neural  "$sub" "$@" ;;
     status|mcp|config|hooks|progress)
       _rfl_run_misc "$cmd" "$sub" "$@" && return
       _rfl_run_default "$cmd" "$sub" "$@"
@@ -38,7 +40,7 @@ _rfl_run_default() {
     _decoded+=("${_a//__RFL_SP__/ }")
   done
   echo ""
-  print -P "%F{51}%B$cmd $sub%b%f"
+  print -P "%B$cmd $sub%b"
   echo ""
   local _out
   _out=$(_rfl_spin "Running..." ruflo "$cmd" "$sub" "${_decoded[@]}")

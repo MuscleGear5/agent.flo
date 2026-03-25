@@ -12,7 +12,7 @@ _rfl_run_hive2() {
         out=$(_rfl_spin "Joining $aid..." ruflo mcp exec --tool hive-mind_join -p "{\"agentId\":\"$aid\"}")
         if [[ "$out" == *'"success"'*true* ]]; then
           ruflo mcp exec --tool coordination_node -p "{\"nodeId\":\"$aid\",\"role\":\"worker\"}" 2>&1 >/dev/null
-          print -P "  %F{48}[+]%f %F{51}$aid%f joined hive + coordination"
+          print -P "  %F{48}[+]%f %F{96}$aid%f joined hive + coordination"
           ((joined++))
         else
           print -P "  %F{196}[x]%f $aid join failed"
@@ -30,7 +30,7 @@ _rfl_run_hive2() {
       for aid in "${aids[@]}"; do
         out=$(_rfl_spin "Removing $aid..." ruflo mcp exec --tool hive-mind_leave -p "{\"agentId\":\"$aid\"}")
         if [[ "$out" == *'"success"'*true* ]]; then
-          print -P "  %F{48}[-]%f %F{51}$aid%f left hive"
+          print -P "  %F{48}[-]%f %F{96}$aid%f left hive"
           ((left++))
         else
           print -P "  %F{196}[x]%f $aid leave failed"
@@ -42,14 +42,14 @@ _rfl_run_hive2() {
       local topic="${*//\"/}"
       topic="${topic//__RFL_SP__/ }"
       [[ -z "$topic" ]] && { print -P "%F{196}[ERROR] No topic%f"; return 1; }
-      print -P "%F{51}Running consensus on:%f $topic"
+      print -P "%F{96}Running consensus on:%f $topic"
       local out
       out=$(_rfl_spin "Running consensus..." ruflo mcp exec --tool hive-mind_consensus -p "{\"topic\":\"$(_rfl_json_esc "$topic")\"}")
       if [[ "$out" == *'{'* ]]; then
         echo "$out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+  d=pj(sys.stdin.read())
   print(f'  Decision:    {d.get(\"decision\",d.get(\"result\",\"pending\"))}')
   print(f'  Votes:       {d.get(\"votes\",d.get(\"participants\",\"?\"))}')
   c=d.get('confidence',d.get('agreement',''))
@@ -79,14 +79,14 @@ except Exception as e: print(f'  [parse error] {e}')
       ;;
     memory)
       echo ""
-      gum style --border rounded --border-foreground 7 --padding "0 2" --foreground 141 --bold "Hive Memory"
+      print -P "%BHive Memory%b"
       local out
       out=$(_rfl_spin "Loading hive memory..." ruflo mcp exec --tool hive-mind_memory -p "{\"action\":\"list\"}")
       if [[ "$out" == *'{'* ]]; then
         echo "$out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+  d=pj(sys.stdin.read())
   mems=d.get('memories', d.get('items', d.get('entries',[])))
   if not mems: print('  (empty)')
   else:

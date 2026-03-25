@@ -13,16 +13,14 @@ _rfl_run_misc() {
       local _out
       _out=$(_rfl_spin "Checking MCP..." ruflo mcp exec --tool mcp_status -p "{}")
       echo "$_out" | python3 -c "
-import sys,json
-R='\x1b[0m'; GR='\x1b[92m'; RD='\x1b[91m'; CY='\x1b[96m'
-try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+${_RFL_PYLIB}
+txt=sys.stdin.read(); d=pj(txt)
+if d:
   run=d.get('running',False)
   print(f'  status: {GR}running{R}' if run else f'  status: {RD}stopped{R}')
   for k,v in d.items():
     if k=='running': continue
     if v is not None: print(f'  {k}: {CY}{v}{R}')
-except: pass
 " 2>/dev/null
       echo ""
       ;;
@@ -37,13 +35,11 @@ except: pass
       fi
       echo ""
       echo "$_out" | python3 -c "
-import sys,json
-CY='\x1b[96m'; R='\x1b[0m'
-try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+${_RFL_PYLIB}
+txt=sys.stdin.read(); d=pj(txt)
+if d:
   for k,v in d.items():
     if v is not None: print(f'  {k}: {CY}{v}{R}')
-except: pass
 " 2>/dev/null
       echo ""
       ;;
@@ -61,7 +57,7 @@ except: pass
       local _out
       _out=$(_rfl_spin "Setting..." ruflo mcp exec --tool config_set -p "{\"key\":\"$(_rfl_json_esc "$key")\",\"value\":\"$(_rfl_json_esc "$val")\"}")
       if [[ "$_out" == *'"success"'*true* ]]; then
-        print -P "%F{48}[OK]%f Set %F{51}$key%f = %F{245}$val%f"
+        print -P "%F{48}[OK]%f Set %F{96}$key%f = %F{245}$val%f"
       else
         print -P "%F{196}[x] Set failed%f"
       fi
@@ -83,21 +79,19 @@ except: pass
       _out=$(_rfl_spin "Loading hooks..." ruflo mcp exec --tool hooks_list -p "{}")
       local _table
       _table=$(echo "$_out" | python3 -c "
-import sys,json
-try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
-  hooks=d.get('hooks', d.get('items', []))
-  if hooks:
-    print('Name|Type|Status')
-    for h in hooks:
-      n=h.get('name',h.get('id','?'))
-      t=h.get('type',h.get('event','?'))
-      s=h.get('status','active')
-      print(f'{n}|{t}|{s}')
-except: pass
+${_RFL_PYLIB}
+txt=sys.stdin.read(); d=pj(txt)
+hooks=d.get('hooks', d.get('items', []))
+if hooks:
+  print('Name|Type|Status')
+  for h in hooks:
+    n=h.get('name',h.get('id','?'))
+    t=h.get('type',h.get('event','?'))
+    s=h.get('status','active')
+    print(f'{n}|{t}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(no hooks)%f"
       fi
@@ -107,22 +101,20 @@ except: pass
       echo ""
       local _out
       _out=$(_rfl_spin "Loading metrics..." ruflo mcp exec --tool hooks_metrics -p "{}")
-      gum style --border rounded --border-foreground 7 --padding "0 2" --foreground 141 --bold "Hook Metrics"
+      print -P "%BHook Metrics%b"
       echo "$_out" | python3 -c "
-import sys,json
-CY='\x1b[96m'; R='\x1b[0m'
-try:
-  txt=sys.stdin.read(); d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+${_RFL_PYLIB}
+txt=sys.stdin.read(); d=pj(txt)
+if d:
   for k,v in d.items():
     if k not in ('success',) and v is not None: print(f'  {k}: {CY}{v}{R}')
-except: pass
 " 2>/dev/null
       echo ""
       ;;
 
     progress:watch)
       echo ""
-      print -P "%F{51}%Bprogress watch%b%f  %F{245}(ctrl-c to stop)%f"
+      print -P "%Bprogress watch%b  %F{245}(ctrl-c to stop)%f"
       echo ""
       ruflo progress watch 2>&1 | _rfl_colorize
       ;;
@@ -134,8 +126,7 @@ except: pass
       _table=$(printf '%s' "$_out" | python3 -c "
 ${_RFL_PYLIB}
 txt=sys.stdin.read()
-try: d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
-except: d={}
+d=pj(txt)
 if not d: print('(no data)')
 else:
     rows=[]
@@ -151,7 +142,7 @@ else:
         for r in rows: print(r)
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         echo "$_out" | _rfl_colorize
       fi

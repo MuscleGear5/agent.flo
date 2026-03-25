@@ -6,34 +6,28 @@ _rfl_run_wf() {
   case "$sub" in
     list)
       echo ""
-      gum style --border thick --border-foreground 7 --padding "0 2" \
-        --foreground 141 --bold "Workflows"
+      print -P "%BWorkflows%b"
       echo ""
       local _wl_data
       _wl_data=$(_rfl_spin "Loading workflows..." ruflo mcp exec --tool workflow_list)
       local _table
       _table=$(echo "$_wl_data" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  txt=sys.stdin.read(); d=pj(txt)
   wl=d.get('workflows', d.get('items',[]))
   if not wl: pass
   else:
-    print('ID,Name,Status')
+    print('ID|Name|Status')
     for w in wl:
       wid=w.get('workflowId',w.get('id','?'))
       name=w.get('name',w.get('template',''))
       st=w.get('status','')
-      print(f'{wid},{name},{st}')
+      print(f'{wid}|{name}|{st}')
 except Exception as e: print(f'ERR: {e}',file=sys.stderr)
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator ',' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(none)%f"
       fi
@@ -48,7 +42,7 @@ except Exception as e: print(f'ERR: {e}',file=sys.stderr)
       local wid
       wid=$(echo "$_wr_out" | grep -oP '"workflowId"\s*:\s*"\K[^"]+' | head -1)
       if [[ -n "$wid" ]]; then
-        print -P "%F{48}[+]%f Workflow started: %F{51}$wid%f"
+        print -P "%F{48}[+]%f Workflow started: %F{96}$wid%f"
         print -P "  %F{245}Template: $template%f"
       else
         print -P "%F{196}[x] Workflow run failed%f"; echo "$_wr_out"
@@ -63,13 +57,7 @@ except Exception as e: print(f'ERR: {e}',file=sys.stderr)
       _table=$(echo "$_wst_out" | python3 -c "
 ${_RFL_PYLIB}
 wid='$wid'
-txt=sys.stdin.read()
-i=txt.rindex('}'); n=0
-for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-d=json.loads(txt[k:i+1])
+txt=sys.stdin.read(); d=pj(txt)
 items=d.get('workflows',d.get('items',[]))
 w=next((x for x in items if x.get('workflowId',x.get('id',''))==wid),None)
 if w:
@@ -85,7 +73,7 @@ if w:
         print(f'{k}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(not found)%f"
       fi
@@ -108,14 +96,9 @@ if w:
       _wt_out=$(_rfl_spin "Loading templates..." ruflo mcp exec --tool workflow_template -p "{}")
       local _table
       _table=$(echo "$_wt_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  txt=sys.stdin.read(); d=pj(txt)
   tpls=d.get('templates', d.get('items', []))
   if tpls:
     print('Name|Description')
@@ -127,9 +110,9 @@ except: pass
 " 2>/dev/null)
       echo ""
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        gum style --border thick --border-foreground 7 --padding "0 2" --foreground 141 --bold "Workflow Templates"
+        print -P "%BWorkflow Templates%b"
         echo ""
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(no templates)%f"
       fi

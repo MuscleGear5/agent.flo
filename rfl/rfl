@@ -13,6 +13,16 @@ SCRIPT_DIR="${0:A:h}"
 # Force gum/charmbracelet to always output colors regardless of pipe/TTY
 export CLICOLOR_FORCE=1
 
+# ── Dependency checks ────────────────────────────────────
+typeset -a _missing=()
+command -v ruflo   &>/dev/null || _missing+=("ruflo (npm i -g @claude-flow/cli@latest)")
+command -v python3 &>/dev/null || _missing+=("python3 (3.10+)")
+if (( ${#_missing} > 0 )); then
+  echo "Error: missing required dependencies:" >&2
+  for _m in "${_missing[@]}"; do echo "  - $_m" >&2; done
+  exit 1
+fi
+
 # ── Load modules ──────────────────────────────────────────
 source "$SCRIPT_DIR/rfl.d/commands.zsh"
 source "$SCRIPT_DIR/rfl.d/helpers.zsh"
@@ -140,7 +150,7 @@ _fzf_out=$(printf '%s\n' "${unified[@]}" | fzf \
   --height=90% \
   --margin=1,2 \
   --no-sort \
-  --color="border:141,label:141,preview-border:51,preview-label:51,prompt:141,pointer:198,hl:51,hl+:198,header:245" \
+  --color="border:7,label:7:bold,preview-border:7,preview-label:7:bold,prompt:7:bold,pointer:48,hl:48,hl+:48:bold,header:245" \
   --header="  type to search all commands  │  ↑↓ navigate  │  enter select  │  esc quit  │  ctrl-s: toggle AI" \
   --header-first \
   --pointer=">" \
@@ -207,7 +217,7 @@ while true; do
     --preview-label-pos=3 \
     --height=80% \
     --margin=1,2 \
-    --color="border:141,label:141,preview-border:51,preview-label:51,prompt:141,pointer:198,hl:51,hl+:198,header:245" \
+    --color="border:7,label:7:bold,preview-border:7,preview-label:7:bold,prompt:7:bold,pointer:48,hl:48,hl+:48:bold,header:245" \
     --header="  type to search  │  ↑↓ navigate  │  enter select  │  esc back  │  ctrl-s: toggle AI" \
     --header-first \
     --pointer=">" \
@@ -223,7 +233,7 @@ while true; do
   typeset sel_sub="${CMD_SELECTED#* }"
 
   # Action chooser
-  ACTION=$(gum choose --header="ruflo $sel_cmd $sel_sub" --header.foreground=141 \
+  ACTION=$(gum choose --header="ruflo $sel_cmd $sel_sub" --header.foreground=7 \
     "Run" "Explain" "Cancel")
 
   case "$ACTION" in

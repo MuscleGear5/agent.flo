@@ -6,21 +6,15 @@ _rfl_run_neural() {
   case "$sub" in
     status)
       echo ""
-      gum style --border rounded --border-foreground 7 --padding "0 2" \
-        --foreground 141 --bold "Neural Status"
+      print -P "%BNeural Status%b"
       echo ""
       local _out
       _out=$(_rfl_spin "Loading..." ruflo mcp exec --tool neural_status -p "{\"detailed\":true}")
       if [[ "$_out" == *'{'* ]]; then
         echo "$_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  txt=sys.stdin.read(); d=pj(txt)
   for k,v in d.items():
     if k not in ('success',) and v not in (None,''):
       print(f'  {k}: {v}')
@@ -33,21 +27,15 @@ except Exception as e: print(f'  [error] {e}')
       ;;
     patterns)
       echo ""
-      gum style --border rounded --border-foreground 7 --padding "0 2" \
-        --foreground 141 --bold "Neural Patterns"
+      print -P "%BNeural Patterns%b"
       echo ""
       local _out
       _out=$(_rfl_spin "Loading patterns..." ruflo mcp exec --tool neural_patterns -p "{\"action\":\"list\"}")
       if [[ "$_out" == *'{'* ]]; then
         echo "$_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  txt=sys.stdin.read(); d=pj(txt)
   pats=d.get('patterns', d.get('items', d.get('results',[])))
   if not pats:
     print('  (none)')
@@ -75,14 +63,9 @@ except Exception as e: print(f'  [error] {e}')
       if [[ "$_out" == *'{'* ]]; then
         echo ""
         echo "$_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  txt=sys.stdin.read(); d=pj(txt)
   preds=d.get('predictions', d.get('results', d.get('output',[])))
   if isinstance(preds,list):
     for p in preds:
@@ -137,14 +120,9 @@ except Exception as e: print(f'  [error] {e}')
       _out=$(_rfl_spin "Optimizing ($target)..." ruflo mcp exec --tool neural_optimize -p "{\"target\":\"$target\"}")
       if [[ "$_out" == *'{'* ]]; then
         echo "$_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  txt=sys.stdin.read(); d=pj(txt)
   for k,v in d.items():
     if k not in ('success',) and v not in (None,''):
       print(f'  {k}: {v}')

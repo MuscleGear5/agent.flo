@@ -1,0 +1,3 @@
+# Reference-only agent type definitions.
+# Not consumed by any code path — agent types are fetched live from ruflo CLI.
+# Kept as documentation of supported agent capabilities and default configs.

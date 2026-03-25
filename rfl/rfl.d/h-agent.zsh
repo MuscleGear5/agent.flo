@@ -12,12 +12,7 @@ _rfl_run_agent() {
       _table=$(echo "$_al_data" | python3 -c "
 ${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  txt=sys.stdin.read(); d=pj(txt)
   print('Status|Type|ID')
   for a in d.get('agents',[]):
     at=a.get('agentType','?'); aid=a.get('agentId',a.get('id','?')); st=a.get('status','?')
@@ -26,7 +21,7 @@ try:
 except: pass
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(none)%f"
       fi
@@ -41,7 +36,7 @@ except: pass
       _table=$(printf '%s' "$_as_raw" | python3 -c "
 ${_RFL_PYLIB}
 txt=sys.stdin.read()
-try: d=json.loads(txt[txt.index('{'):txt.rindex('}')+1])
+try: d=pj(txt)
 except: d={}
 a=next((x for x in d.get('agents',[]) if x.get('agentId',x.get('id',''))=='$aid'),None)
 if a:
@@ -54,7 +49,7 @@ if a:
         print(f'{k}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(not found: $aid)%f"
       fi
@@ -75,7 +70,7 @@ if a:
       local _sp_out
       _sp_out=$(_rfl_spin "Spawning $atype..." ruflo mcp exec --tool agent_spawn -p "{\"agentType\":\"$atype\",\"agentId\":\"$aid\"}")
       if [[ "$_sp_out" == *'"success"'*true* ]]; then
-        print -P "%F{48}[+]%f %F{51}$aid%f (%F{245}$atype%f)"
+        print -P "%F{48}[+]%f %F{96}$aid%f (%F{245}$atype%f)"
       else
         print -P "%F{196}[x] Spawn failed%f"
       fi
@@ -87,7 +82,7 @@ if a:
       local _st_out
       _st_out=$(_rfl_spin "Stopping $aid..." ruflo mcp exec --tool agent_terminate -p "{\"agentId\":\"$aid\"}")
       if [[ "$_st_out" == *'"success"'*true* ]]; then
-        print -P "%F{48}[-]%f %F{51}$aid%f stopped"
+        print -P "%F{48}[-]%f %F{96}$aid%f stopped"
       else
         print -P "%F{196}[x] Stop failed%f"
       fi
@@ -103,14 +98,9 @@ if a:
       fi
       if [[ "$_ap_out" == *'{'* ]]; then
         echo "$_ap_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
-  txt=sys.stdin.read(); i=txt.rindex('}'); n=0
-  for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-  d=json.loads(txt[k:i+1])
+  d=pj(sys.stdin.read())
   for k,v in d.items():
     if k not in ('success',): print(f'  {k}: {v}')
 except: pass
@@ -129,12 +119,7 @@ except: pass
 ${_RFL_PYLIB}
 aid='$aid'
 txt=sys.stdin.read()
-i=txt.rindex('}'); n=0
-for k in range(i,-1,-1):
-    if txt[k]=='}': n+=1
-    elif txt[k]=='{': n-=1
-    if n==0: break
-d=json.loads(txt[k:i+1])
+d=pj(txt)
 a=next((x for x in d.get('agents',[]) if x.get('agentId',x.get('id',''))==aid),None)
 if a:
     print('Field|Value')
@@ -148,7 +133,7 @@ if a:
         print(f'{k}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border rounded --border.foreground 7 --print
+        echo "$_table" | gum table --separator '|' --border thick --print
       else
         print -P "  %F{245}(no data)%f"
       fi

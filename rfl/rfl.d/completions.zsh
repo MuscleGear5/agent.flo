@@ -21,11 +21,10 @@ _rfl_table_col() {
 _rfl_agents() {
   # Use MCP tool for full agent IDs + type labels
   ruflo mcp exec --tool agent_list 2>&1 | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
   txt = sys.stdin.read()
-  start = txt.index('{')
-  data = json.loads(txt[start:txt.rindex('}')+1])
+  data = pj(txt)
   for a in data.get('agents', []):
     print(f\"{a['agentId']}  ({a['agentType']} / {a['status']})\")
 except: pass
@@ -33,11 +32,10 @@ except: pass
 }
 _rfl_tasks() {
   ruflo mcp exec --tool task_list 2>&1 | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
   txt = sys.stdin.read()
-  start = txt.index('{')
-  data = json.loads(txt[start:txt.rindex('}')+1])
+  data = pj(txt)
   for t in data.get('tasks', []):
     print(f\"{t.get('taskId', t.get('id',''))}  ({t.get('status','')})\")
 except: pass
@@ -45,11 +43,10 @@ except: pass
 }
 _rfl_sessions() {
   ruflo mcp exec --tool session_list 2>&1 | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
   txt = sys.stdin.read()
-  start = txt.index('{')
-  data = json.loads(txt[start:txt.rindex('}')+1])
+  data = pj(txt)
   for s in data.get('sessions', []):
     print(f\"{s.get('sessionId', s.get('id',''))}  ({s.get('name','')})\")
 except: pass
@@ -68,11 +65,10 @@ _rfl_workflows() {
   mcp_out=$(ruflo mcp exec --tool workflow_list 2>&1)
   if echo "$mcp_out" | grep -q '{'; then
     echo "$mcp_out" | python3 -c "
-import sys,json
+${_RFL_PYLIB}
 try:
   txt = sys.stdin.read()
-  start = txt.index('{')
-  data = json.loads(txt[start:txt.rindex('}')+1])
+  data = pj(txt)
   for w in data.get('workflows', data.get('items', [])):
     wid = w.get('workflowId', w.get('id', ''))
     name = w.get('name', w.get('template', ''))
