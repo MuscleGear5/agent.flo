@@ -182,34 +182,11 @@ def result_count(n: int, label: str = "items"):
         console.print(f"[bold white]  {n} {label}[/]")
 
 
-# ── Static next-action hints (non-agent commands) ─────────────────────────
-_HINTS: dict[str, list[str]] = {
-    "task_list":     ["rfl task create", "rfl task assign", "rfl task status"],
-    "task_create":   ["rfl task assign", "rfl task list"],
-    "task_status":   ["rfl task complete", "rfl task cancel", "rfl task retry"],
-    "swarm_init":    ["rfl swarm status", "rfl swarm start", "rfl agent list"],
-    "swarm_start":   ["rfl swarm status", "rfl agent list", "rfl task list"],
-    "swarm_status":  ["rfl swarm stop", "rfl agent list", "rfl task list"],
-    "memory_store":  ["rfl memory list", "rfl memory search"],
-    "memory_search": ["rfl memory retrieve", "rfl memory store"],
-    "memory_list":   ["rfl memory search", "rfl memory retrieve", "rfl memory delete"],
-    "neural_train":  ["rfl neural status", "rfl neural patterns", "rfl neural predict"],
-    "neural_status": ["rfl neural train", "rfl neural optimize", "rfl neural patterns"],
-    "session_list":  ["rfl session current", "rfl session restore"],
-    "hive-mind_init":    ["rfl hive-mind status", "rfl hive-mind spawn"],
-    "hive-mind_status":  ["rfl hive-mind consensus", "rfl hive-mind memory"],
-}
-
-
 def footer_hints(cmd: str, sub: str):
-    """Print static next-action hints after a command result."""
-    key = f"{cmd}_{sub}"
-    hints = _HINTS.get(key)
-    if not hints:
-        return
-    parts = [f"[dim]{h}[/]" for h in hints]
-    console.print()
-    console.print(f"[dim]Next:[/]  {'  │  '.join(parts)}")
+    """AI-powered suggestions — delegates to suggest module."""
+    import importlib
+    _suggest = importlib.import_module(".suggest", __name__.rsplit(".", 1)[0])
+    _suggest.show_suggestions(cmd, sub)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -363,7 +340,8 @@ def choose(label: str, choices: list[str]) -> str | None:
     if shutil.which("fzf") and len(choices) > 1:
         try:
             proc = subprocess.run(
-                ["fzf", "--no-sort", f"--height={min(len(choices) + 4, 20)}",
+                ["fzf", "--no-sort", "--no-mouse",
+                 f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
                  "--pointer=>", "--no-info"],
@@ -397,7 +375,7 @@ def multi_choose(label: str, choices: list[str]) -> list[str]:
     if shutil.which("fzf") and len(choices) > 1:
         try:
             proc = subprocess.run(
-                ["fzf", "--multi", "--no-sort",
+                ["fzf", "--multi", "--no-sort", "--no-mouse",
                  f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
