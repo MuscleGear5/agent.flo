@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import importlib
 import os
+import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -728,10 +730,10 @@ def _handle_agent_stop(args: dict) -> dict | None:
         return None
     with ui.spin(f"Stopping {aid}..."):
         result = mcp_exec("agent_terminate", {"agentId": aid})
-    if result.get("success"):
-        ui.success(f"Agent {aid} stopped")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to stop {aid}"))
+        ui.success(f"Agent {aid} stopped")
     return result
 
 
@@ -818,10 +820,10 @@ def _handle_task_cancel(args: dict):
         return
     with ui.spin(f"Cancelling {tid}..."):
         result = mcp_exec("task_cancel", {"taskId": tid})
-    if result.get("success"):
-        ui.success(f"Task {tid} cancelled")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to cancel {tid}"))
+        ui.success(f"Task {tid} cancelled")
 
 
 def _handle_task_retry(args: dict):
@@ -831,10 +833,10 @@ def _handle_task_retry(args: dict):
         return
     with ui.spin(f"Retrying {tid}..."):
         result = mcp_exec("task_execute", {"taskId": tid})
-    if result.get("success"):
-        ui.success(f"Task {tid} retried")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to retry {tid}"))
+        ui.success(f"Task {tid} retried")
 
 
 def _handle_task_complete(args: dict):
@@ -844,10 +846,10 @@ def _handle_task_complete(args: dict):
         return
     with ui.spin(f"Completing {tid}..."):
         result = mcp_exec("task_complete", {"taskId": tid})
-    if result.get("success"):
-        ui.success(f"Task {tid} completed")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to complete {tid}"))
+        ui.success(f"Task {tid} completed")
 
 
 def _handle_task_assign(args: dict):
@@ -869,10 +871,13 @@ def _handle_task_assign(args: dict):
             "taskId": tid,
             "agentIds": agent_ids,  # Always a list
         })
-    if result.get("success"):
-        ui.success(f"Task {tid} assigned to {', '.join(agent_ids)}")
+    if result.get("error"):
+        ui.error(result["error"])
+    elif result.get("assignedTo") or result.get("success"):
+        assigned = result.get("assignedTo", agent_ids)
+        ui.success(f"Task {tid} assigned to {', '.join(assigned)}")
     else:
-        ui.error(result.get("error", "Assign failed"))
+        ui.error("Assign failed")
 
 
 # ── Session ────────────────────────────────────────────────────────────────
@@ -884,10 +889,10 @@ def _handle_session_restore(args: dict):
         return
     with ui.spin(f"Restoring session {sid}..."):
         result = mcp_exec("session_restore", {"sessionId": sid})
-    if result.get("success"):
-        ui.success(f"Session {sid} restored")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to restore {sid}"))
+        ui.success(f"Session {sid} restored")
 
 
 def _handle_session_delete(args: dict):
@@ -899,10 +904,10 @@ def _handle_session_delete(args: dict):
         return
     with ui.spin(f"Deleting session {sid}..."):
         result = mcp_exec("session_delete", {"sessionId": sid})
-    if result.get("success"):
-        ui.success(f"Session {sid} deleted")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to delete {sid}"))
+        ui.success(f"Session {sid} deleted")
 
 
 def _handle_session_export(args: dict):
@@ -934,10 +939,10 @@ def _handle_memory_store(args: dict):
             "value": value,
             "namespace": ns,
         })
-    if result.get("success"):
-        ui.success(f"Stored: {key} in {ns}")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", "Store failed"))
+        ui.success(f"Stored: {key} in {ns}")
 
 
 def _handle_memory_search(args: dict):
@@ -977,10 +982,10 @@ def _handle_memory_delete(args: dict):
         return
     with ui.spin(f"Deleting {key}..."):
         result = mcp_exec("memory_delete", {"key": key})
-    if result.get("success"):
-        ui.success(f"Deleted: {key}")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to delete {key}"))
+        ui.success(f"Deleted: {key}")
 
 
 # ── Session (additional) ──────────────────────────────────────────────────
@@ -991,11 +996,11 @@ def _handle_session_save(args: dict):
     if not sid:
         return
     with ui.spin(f"Saving session {sid}..."):
-        result = mcp_exec("session_save", {"sessionId": sid})
-    if result.get("success"):
-        ui.success(f"Session {sid} saved")
+        result = mcp_exec("session_save", {"name": sid})
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to save {sid}"))
+        ui.success(f"Session {sid} saved")
 
 
 def _handle_session_import(args: dict):
@@ -1005,10 +1010,10 @@ def _handle_session_import(args: dict):
         return
     with ui.spin(f"Importing session {sid}..."):
         result = mcp_exec("session_restore", {"sessionId": sid})
-    if result.get("success"):
-        ui.success(f"Session {sid} imported")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", f"Failed to import {sid}"))
+        ui.success(f"Session {sid} imported")
 
 
 # ── Neural (additional) ──────────────────────────────────────────────────
@@ -1108,8 +1113,8 @@ def _handle_hive_mind_init(args: dict):
     # 2. Initialize hive-mind
     with ui.spin(f"Initializing hive-mind ({topology})..."):
         result = mcp_exec("hive-mind_init", {"topology": topology})
-    if not (result.get("success") or result.get("hiveMindId")):
-        ui.error(result.get("error", "Hive-mind init failed"))
+    if result.get("error"):
+        ui.error(result["error"])
         return
     ui.success(f"Hive-mind initialized ({topology})")
 
@@ -1244,10 +1249,10 @@ def _handle_hive_mind_task(args: dict):
             "strategy": "auto",
             "description": desc,
         })
-    if orch_result.get("success"):
-        ui.success("Orchestration started")
-    else:
+    if orch_result.get("error"):
         ui.info("Orchestration queued")
+    else:
+        ui.success("Orchestration started")
 
     ui.console.print()
     ui.success(f"Task {tid} dispatched")
@@ -1264,8 +1269,8 @@ def _handle_hive_mind_broadcast(args: dict):
     # 1. Broadcast to hive
     with ui.spin("Broadcasting..."):
         result = mcp_exec("hive-mind_broadcast", {"message": msg})
-    if not (result.get("success")):
-        ui.error(result.get("error", "Broadcast failed"))
+    if result.get("error"):
+        ui.error(result["error"])
         return
     ui.success("Broadcast sent to hive")
 
@@ -1301,12 +1306,12 @@ def _handle_hive_mind_join(args: dict):
     for aid in agent_ids:
         with ui.spin(f"Joining {aid}..."):
             result = mcp_exec("hive-mind_join", {"agentId": aid})
-        if result.get("success"):
+        if result.get("error"):
+            ui.error(f"{aid} join failed: {result['error']}")
+        else:
             mcp_exec("coordination_node", {"nodeId": aid, "role": "worker"})
             ui.success(f"{aid} joined hive + coordination")
             joined += 1
-        else:
-            ui.error(f"{aid} join failed")
 
     if joined > 0:
         mcp_exec("coordination_sync", {"action": "sync"})
@@ -1327,11 +1332,11 @@ def _handle_hive_mind_leave(args: dict):
     for aid in agent_ids:
         with ui.spin(f"Removing {aid}..."):
             result = mcp_exec("hive-mind_leave", {"agentId": aid})
-        if result.get("success"):
+        if result.get("error"):
+            ui.error(f"{aid} leave failed: {result['error']}")
+        else:
             ui.success(f"{aid} left hive")
             left += 1
-        else:
-            ui.error(f"{aid} leave failed")
 
     if left > 0:
         ui.success(f"{left} agent(s) left hive")
@@ -1457,10 +1462,10 @@ def _handle_hive_mind_optimize_memory(args: dict):
     """
     with ui.spin("Optimizing hive memory..."):
         result = mcp_exec("hive-mind_memory", {"action": "optimize"})
-    if result.get("success"):
-        ui.success("Hive memory optimized")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", "Optimization failed"))
+        ui.success("Hive memory optimized")
 
 
 def _handle_hive_mind_shutdown(args: dict):
@@ -1472,10 +1477,14 @@ def _handle_hive_mind_shutdown(args: dict):
         return
     with ui.spin("Shutting down hive-mind..."):
         result = mcp_exec("hive-mind_shutdown")
-    if result.get("success"):
-        ui.success("Hive-mind shut down")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", "Shutdown failed"))
+        ui.success("Hive-mind shut down")
+
+
+
+
 
 
 # ── Neural ─────────────────────────────────────────────────────────────────
@@ -1548,10 +1557,10 @@ def _handle_config_set(args: dict):
         return
     with ui.spin(f"Setting {key}..."):
         result = mcp_exec("config_set", {"key": key, "value": value})
-    if result.get("success"):
-        ui.success(f"Set {key} = {value}")
+    if result.get("error"):
+        ui.error(result["error"])
     else:
-        ui.error(result.get("error", "Set failed"))
+        ui.success(f"Set {key} = {value}")
 
 
 # ── Hooks ──────────────────────────────────────────────────────────────────
@@ -1597,6 +1606,77 @@ def _handle_doctor_run(args: dict):
             ui.show_table("Health Checks", cols, rows)
             return
     _auto_display("doctor", "run", result)
+
+
+# ── Tutor (rft) ───────────────────────────────────────────────────────────
+
+def _rft_path() -> str | None:
+    """Locate the rft script — repo-local first, then PATH."""
+    repo = os.path.join(os.path.dirname(os.path.dirname(__file__)), "rft")
+    if os.path.isfile(repo) and os.access(repo, os.X_OK):
+        return repo
+    return shutil.which("rft")
+
+
+def _run_rft(*rft_args: str):
+    """Execute rft with args, streaming output to the terminal."""
+    path = _rft_path()
+    if not path:
+        ui.error("rft not found — install it or check your PATH")
+        return
+    try:
+        subprocess.run([path, *rft_args], check=False)
+    except FileNotFoundError:
+        ui.error(f"rft not found at {path}")
+    except KeyboardInterrupt:
+        pass
+
+
+def _handle_tutor_ask(args: dict):
+    """Ask a question about ruflo via rft ask."""
+    question = args.get("question") or Prompt.ask("Question")
+    if not question:
+        return
+    _run_rft("ask", question)
+
+
+def _handle_tutor_explain(args: dict):
+    """Explain a specific command via rft explain."""
+    cmd = args.get("command") or Prompt.ask("Command")
+    if not cmd:
+        return
+    sub = args.get("subcommand") or Prompt.ask("Subcommand (optional)", default="")
+    rft_args = ["explain", cmd]
+    if sub:
+        rft_args.append(sub)
+    _run_rft(*rft_args)
+
+
+def _handle_tutor_browse(args: dict):
+    """Interactive browse & learn via rft browse."""
+    _run_rft("browse")
+
+
+def _handle_tutor_scan(args: dict):
+    """Discover commands, agents, skills via rft scan."""
+    _run_rft("scan")
+
+
+def _handle_tutor_quiz(args: dict):
+    """Test your knowledge via rft quiz."""
+    _run_rft("quiz")
+
+
+def _handle_tutor_build(args: dict):
+    """Build a command interactively via rft build."""
+    cmd = args.get("command") or Prompt.ask("Command (optional)", default="")
+    sub = args.get("subcommand") or Prompt.ask("Subcommand (optional)", default="")
+    rft_args = ["build"]
+    if cmd:
+        rft_args.append(cmd)
+    if sub:
+        rft_args.append(sub)
+    _run_rft(*rft_args)
 
 
 # ---------------------------------------------------------------------------
@@ -1663,4 +1743,11 @@ CUSTOM_HANDLERS: dict[str, Callable[..., dict | None]] = {
     "hooks_model-route":       _handle_hooks_route,
     # Doctor — handled by CLI passthrough
     # "doctor_run" and "doctor_--fix" routed via _CLI_PASSTHROUGH
+    # Tutor (rft)
+    "tutor_ask":               _handle_tutor_ask,
+    "tutor_explain":           _handle_tutor_explain,
+    "tutor_browse":            _handle_tutor_browse,
+    "tutor_scan":              _handle_tutor_scan,
+    "tutor_quiz":              _handle_tutor_quiz,
+    "tutor_build":             _handle_tutor_build,
 }
