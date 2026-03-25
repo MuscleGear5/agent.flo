@@ -1,258 +1,49 @@
 #!/bin/zsh
 # rfl - interactive + non-interactive ruflo wrapper
 # Usage:
-#   rfl                       Interactive fzf menus (with Search + Tutor)
-#   rfl agent spawn -t coder  Non-interactive passthrough
-#   rfl --list                Dump all command paths
-#   rfl --test-all          Test every command path (--help)
-#   rfl --test-all --run    Test every command path (actually run)
-#   rfl --tutor             Interactive tutor (browse, learn, quiz)
-#   rfl --tutor "question"  Ask the tutor anything about ruflo
+#   rfl                       Interactive pyrfl TUI menu
+#   rfl agent spawn -t coder  Non-interactive passthrough to ruflo
+#   rfl --list                Dump all command paths (via pyrfl)
+#   rfl --test-all            Test every command path (via pyrfl)
+#   rfl --tutor               Interactive tutor (browse, learn, quiz)
+#   rfl --tutor "question"    Ask the tutor anything about ruflo
 
 SCRIPT_DIR="${0:A:h}"
-# Force gum/charmbracelet to always output colors regardless of pipe/TTY
-export CLICOLOR_FORCE=1
 
 # ── Dependency checks ────────────────────────────────────
 typeset -a _missing=()
 command -v ruflo   &>/dev/null || _missing+=("ruflo (npm i -g @claude-flow/cli@latest)")
 command -v python3 &>/dev/null || _missing+=("python3 (3.10+)")
+python3 -c 'import rich' 2>/dev/null || _missing+=("rich (pip install rich)")
 if (( ${#_missing} > 0 )); then
   echo "Error: missing required dependencies:" >&2
   for _m in "${_missing[@]}"; do echo "  - $_m" >&2; done
   exit 1
 fi
 
-# ── Load modules ──────────────────────────────────────────
-source "$SCRIPT_DIR/rfl.d/commands.zsh"
-source "$SCRIPT_DIR/rfl.d/helpers.zsh"
-source "$SCRIPT_DIR/rfl.d/suggest.zsh"
-source "$SCRIPT_DIR/rfl.d/swarm.zsh"
-source "$SCRIPT_DIR/rfl.d/handlers.zsh"
-source "$SCRIPT_DIR/rfl.d/completions.zsh"
-source "$SCRIPT_DIR/rfl.d/build-args.zsh"
+# ── Ensure pyrfl module is importable ─────────────────────
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
-# ── --list: dump all paths ───────────────────────────────────
+# ── --list: dump all command paths ────────────────────────
 if [[ "$1" == "--list" ]]; then
-  for cmd in ${(ko)SUBCMDS}; do
-    for sub in ${=SUBCMDS[$cmd]}; do
-      echo "ruflo $cmd $sub"
-    done
-    # Also show options if any
-    if [[ -n "${CMD_OPTIONS[$cmd]}" ]]; then
-      for opt in ${=CMD_OPTIONS[$cmd]}; do
-        echo "ruflo $cmd $opt"
-      done
-    fi
-  done
-  exit 0
+  exec python3 -m pyrfl --list
 fi
 
-# ── --test-all: test every command path ──────────────────────
+# ── --test-all: test every command path ───────────────────
 if [[ "$1" == "--test-all" ]]; then
-  typeset do_run=false
-  [[ "$2" == "--run" ]] && do_run=true
-
-  typeset pass=0 fail=0 skip=0
-  typeset -a failures=()
-
-  echo "Testing all rfl command paths..."
-  if $do_run; then echo "Mode: RUN (actually execute)"; else echo "Mode: HELP (--help only)"; fi
-  echo "────────────────────────────────────────"
-
-  for cmd in ${(ko)SUBCMDS}; do
-    for sub in ${=SUBCMDS[$cmd]}; do
-      typeset cmdpath="$cmd $sub"
-      printf "  %-40s " "$cmdpath"
-
-      if $do_run; then
-        output=$(ruflo $cmd $sub 2>&1)
-      else
-        output=$(ruflo $cmd $sub --help 2>&1)
-      fi
-      typeset rc=$?
-
-      if [[ $rc -eq 0 ]]; then
-        printf "\033[32mPASS\033[0m\n"
-        ((pass++))
-      elif echo "$output" | grep -qi "unknown\|not found\|error\|invalid"; then
-        printf "\033[31mFAIL\033[0m  %s\n" "$(echo "$output" | head -1)"
-        ((fail++))
-        failures+=("$cmdpath")
-      else
-        printf "\033[33mWARN\033[0m  rc=$rc\n"
-        ((skip++))
-      fi
-    done
-  done
-
-  echo "────────────────────────────────────────"
-  printf "Results: \033[32m%d pass\033[0m  \033[31m%d fail\033[0m  \033[33m%d warn\033[0m\n" $pass $fail $skip
-
-  if (( ${#failures} > 0 )); then
-    echo "\nFailed paths:"
-    for f in "${failures[@]}"; do
-      echo "  - ruflo $f"
-    done
-  fi
-
-  exit $(( fail > 0 ? 1 : 0 ))
+  exec python3 -m pyrfl --test-all
 fi
 
-# ── --tutor: integrated tutoring ─────────────────────────────
+# ── --tutor: integrated tutoring ──────────────────────────
 if [[ "$1" == "--tutor" || "$1" == "-t" ]]; then
   shift
   exec "$SCRIPT_DIR/rft" "$@"
 fi
 
-# ── Non-interactive: passthrough to ruflo ────────────────────
+# ── Non-interactive: passthrough to ruflo ─────────────────
 if [[ $# -gt 0 ]]; then
   exec ruflo "$@"
 fi
 
-# ── Interactive mode guards ────────────────────────────────
-if [[ ! -t 0 ]]; then
-  echo "Error: interactive mode requires a TTY" >&2
-  echo "Usage: rfl <command> [subcommand] [args]" >&2
-  exit 1
-fi
-if ! command -v fzf &>/dev/null; then
-  echo "Error: fzf not found (install: sudo apt install fzf)" >&2
-  exit 1
-fi
-if ! command -v gum &>/dev/null; then
-  echo "Error: gum not found (install: brew install gum)" >&2
-  exit 1
-fi
-
-
-# ── Interactive: load preview cache ────────────────────────
-source "$SCRIPT_DIR/rfl.d/preview.zsh"
-
-# ── Interactive main loop ─────────────────────────────────
-# Query state preserved across iterations so fzf reopens where you left off
-typeset _main_query=""
-
-while true; do
-
-typeset CATEGORY=""
-_ai_label="ON"; [[ -f "$_RFL_SUGGEST_FLAG" ]] && _ai_label="OFF"
-_fzf_out=$(printf '%s\n' "${unified[@]}" | fzf \
-  --print-query \
-  --query="$_main_query" \
-  --prompt="ruflo [AI:$_ai_label] > " \
-  --border=bold \
-  --border-label=" Ruflo  Multi-agent orchestration " \
-  --border-label-pos=3 \
-  --preview="'$PREVIEW_DIR/unified_preview.sh' {} '$PREVIEW_DIR'" \
-  --preview-window=right:55%:border-left:wrap \
-  --preview-label=" Preview " \
-  --preview-label-pos=3 \
-  --height=90% \
-  --margin=1,2 \
-  --no-sort \
-  --color="border:7,label:7:bold,preview-border:7,preview-label:7:bold,prompt:7:bold,pointer:48,hl:48,hl+:48:bold,header:245" \
-  --header="  type to search all commands  │  ↑↓ navigate  │  enter select  │  esc quit  │  ctrl-s: toggle AI" \
-  --header-first \
-  --pointer=">" \
-  --marker="*" \
-  --bind "ctrl-s:execute-silent(if [ -f '$_RFL_SUGGEST_FLAG' ]; then rm -f '$_RFL_SUGGEST_FLAG'; else touch '$_RFL_SUGGEST_FLAG'; fi)")
-_fzf_rc=$?
-
-# Line 1 = query typed, Line 2 = selected item (--print-query)
-_main_query=$(echo "$_fzf_out" | head -1)
-SELECTED=$(echo "$_fzf_out" | sed -n '2p')
-
-# esc or no match → exit
-(( _fzf_rc != 0 )) && break
-
-# Determine what was selected: category, tutor, or direct command
-
-if [[ "$SELECTED" == *"[?]"* ]]; then
-  # Tutor — return to main menu when done
-  "$SCRIPT_DIR/rft" < /dev/tty
-  continue
-fi
-
-if [[ "$SELECTED" == *"[+]"* ]]; then
-  # Category — extract name and drill into submenu
-  typeset CATEGORY="$(echo "$SELECTED" | sed 's/^[^[:alpha:]]*//' | sed 's/  .*//')"
-else
-  # Direct command — extract cmd+sub from right side of │
-  typeset sel_right="$(echo "$SELECTED" | sed 's/.*│[[:space:]]*//')"
-  typeset sel_cmd="${sel_right%% *}"
-  typeset sel_sub="${sel_right#* }"
-  sel_sub="${sel_sub## }"
-  ARGS=$(build_args "$sel_cmd" "$sel_sub") || continue
-  if [[ -n "$ARGS" ]]; then
-    _rfl_run_capture "$sel_cmd" "$sel_sub" ${=ARGS}
-  else
-    _rfl_run_capture "$sel_cmd" "$sel_sub"
-  fi
-  _rfl_pause "$sel_cmd" "$sel_sub"
-  continue
-fi
-
-# Category submenu loop — esc returns to main menu
-# Query preserved so you come back to the same filter after running a command
-typeset -a cmd_entries=()
-for cmd in ${=CATEGORIES[$CATEGORY]}; do
-  for sub in ${=SUBCMDS[$cmd]}; do
-    cmd_entries+=("$cmd $sub")
-  done
-done
-
-typeset _cat_query=""
-while true; do
-  _ai_label="ON"; [[ -f "$_RFL_SUGGEST_FLAG" ]] && _ai_label="OFF"
-  _cat_out=$(printf '%s\n' "${cmd_entries[@]}" | fzf \
-    --print-query \
-    --query="$_cat_query" \
-    --prompt="  [AI:$_ai_label] > " \
-    --border=bold \
-    --border-label=" $CATEGORY " \
-    --border-label-pos=3 \
-    --preview="'$PREVIEW_DIR/cmd_preview.sh' {1} {2}" \
-    --preview-window=right:55%:border-left:wrap \
-    --preview-label=" Help " \
-    --preview-label-pos=3 \
-    --height=80% \
-    --margin=1,2 \
-    --color="border:7,label:7:bold,preview-border:7,preview-label:7:bold,prompt:7:bold,pointer:48,hl:48,hl+:48:bold,header:245" \
-    --header="  type to search  │  ↑↓ navigate  │  enter select  │  esc back  │  ctrl-s: toggle AI" \
-    --header-first \
-    --pointer=">" \
-    --bind "ctrl-s:execute-silent(if [ -f '$_RFL_SUGGEST_FLAG' ]; then rm -f '$_RFL_SUGGEST_FLAG'; else touch '$_RFL_SUGGEST_FLAG'; fi)")
-  _cat_rc=$?
-
-  _cat_query=$(echo "$_cat_out" | head -1)
-  CMD_SELECTED=$(echo "$_cat_out" | sed -n '2p')
-
-  (( _cat_rc != 0 )) && break  # esc → back to main menu
-
-  typeset sel_cmd="${CMD_SELECTED%% *}"
-  typeset sel_sub="${CMD_SELECTED#* }"
-
-  # Action chooser
-  ACTION=$(gum choose --header="ruflo $sel_cmd $sel_sub" --header.foreground=7 \
-    "Run" "Explain" "Cancel")
-
-  case "$ACTION" in
-    Run)
-      ARGS=$(build_args "$sel_cmd" "$sel_sub") || continue
-      if [[ -n "$ARGS" ]]; then
-        _rfl_run_capture "$sel_cmd" "$sel_sub" ${=ARGS}
-      else
-        _rfl_run_capture "$sel_cmd" "$sel_sub"
-      fi
-      _rfl_pause "$sel_cmd" "$sel_sub"
-      ;;
-    Explain)
-      "$SCRIPT_DIR/rft" "$sel_cmd" "$sel_sub" < /dev/tty
-      _rfl_pause "$sel_cmd" "$sel_sub"
-      ;;
-    *) ;;  # Cancel → stays in category submenu
-  esac
-done
-
-done  # main loop
+# ── Interactive: launch pyrfl TUI ─────────────────────────
+exec python3 -m pyrfl

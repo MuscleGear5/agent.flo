@@ -26,6 +26,25 @@ from rich.prompt import Prompt, Confirm  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
+# CLI passthrough — commands that have proper CLI output but no/wrong MCP tool
+# ---------------------------------------------------------------------------
+# These commands are routed through `ruflo_run` (direct CLI) instead of
+# `mcp_exec` because the CLI has rich formatted output while the MCP tool
+# either doesn't exist or returns wrong/minimal data.
+
+_CLI_PASSTHROUGH: frozenset[str] = frozenset({
+    "providers_list", "providers_test", "providers_models", "providers_usage",
+    "providers_configure",
+    "security_scan", "security_cve", "security_threats", "security_audit",
+    "security_secrets", "security_defend",
+    "doctor_run", "doctor_--fix", "doctor_--install",
+    "init_check",
+    "daemon_start", "daemon_stop", "daemon_status", "daemon_restart",
+    "daemon_logs", "daemon_enable",
+})
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -33,25 +52,38 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
                 args: dict | None = None):
     """Route command to appropriate handler or generic MCP call.
 
-    Parameters
-    ----------
-    cmd : str
-        Top-level command (e.g. "agent", "task").
-    sub : str
-        Subcommand (e.g. "spawn", "list").
-    extra_args : list[str] | None
-        Positional CLI args (legacy compat, converted to dict when possible).
-    args : dict | None
-        Pre-built parameter dict -- takes precedence over extra_args.
+    Priority: custom handler > CLI passthrough > generic MCP.
     """
-    # Check for custom handler first
     handler_key = f"{cmd}_{sub}"
+
+    # 1. Check for custom handler first
     custom = CUSTOM_HANDLERS.get(handler_key)
     if custom:
         custom(args or _args_from_list(cmd, sub, extra_args))
         return
 
-    # Generic MCP handler
+    # 2. CLI passthrough — use ruflo CLI directly (rich formatted output)
+    if handler_key in _CLI_PASSTHROUGH:
+        cli_args = []
+        if extra_args:
+            cli_args.extend(extra_args)
+        if args:
+            for k, v in args.items():
+                if k.startswith("_"):
+                    continue
+                cli_args.extend([f"--{k}", str(v)])
+        with ui.spin(f"Running {cmd} {sub}..."):
+            result = ruflo_run(cmd, sub, *cli_args, timeout=30)
+        raw = result.get("raw", "")
+        if raw:
+            ui.console.print(raw)
+        elif result.get("error"):
+            ui.error(result["error"])
+        else:
+            _auto_display(cmd, sub, result)
+        return
+
+    # 3. Generic MCP handler
     cmd_def = COMMANDS.get(cmd, {}).get("subs", {}).get(sub)
     if not cmd_def:
         ui.error(f"Unknown command: {cmd} {sub}")
@@ -1209,9 +1241,8 @@ CUSTOM_HANDLERS: dict[str, Callable[..., None]] = {
     "hive-mind_shutdown":      _handle_hive_mind_shutdown,
     # Neural
     "neural_train":            _handle_neural_train,
-    # Security
-    "security_scan":           _handle_security_scan,
-    "security_audit":          _handle_security_scan,
+    # Security — handled by CLI passthrough, but keep audit as custom
+    # "security_scan" and "security_audit" routed via _CLI_PASSTHROUGH
     # Embeddings
     "embeddings_compare":      _handle_embeddings_compare,
     # Config
@@ -1220,7 +1251,6 @@ CUSTOM_HANDLERS: dict[str, Callable[..., None]] = {
     "hooks_route":             _handle_hooks_route,
     "hooks_coverage-route":    _handle_hooks_route,
     "hooks_model-route":       _handle_hooks_route,
-    # Doctor
-    "doctor_run":              _handle_doctor_run,
-    "doctor_--fix":            _handle_doctor_run,
+    # Doctor — handled by CLI passthrough
+    # "doctor_run" and "doctor_--fix" routed via _CLI_PASSTHROUGH
 }
