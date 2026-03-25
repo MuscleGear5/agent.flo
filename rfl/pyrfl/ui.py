@@ -1,6 +1,9 @@
 """Rich-based UI utilities for pyrfl."""
 
 import re
+import shutil
+import subprocess
+from rich import box
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -9,6 +12,12 @@ from rich.live import Live
 from rich.prompt import Prompt, Confirm
 
 console = Console()
+
+# fzf color scheme — white borders/text, green/yellow/red highlights
+_FZF_COLORS = (
+    "border:7,label:7:bold,preview-border:7,preview-label:7:bold,"
+    "prompt:7:bold,pointer:48,hl:48,hl+:48:bold,header:245"
+)
 
 # Strip emojis and other non-ASCII decorative characters
 _EMOJI_RE = re.compile(
@@ -22,18 +31,60 @@ STATUS_COLORS = {
     "active": "green",
     "running": "green",
     "ready": "green",
-    "completed": "green",
+    "enabled": "green",
+    "healthy": "green",
+    "connected": "green",
+    "installed": "green",
+    "loaded": "green",
+    "configured": "green",
+    "initialized": "green",
+    "verified": "green",
+    "valid": "green",
+    "passed": "green",
+    "success": "green",
+    "open": "green",
+    "started": "green",
+    "synced": "green",
+    "optimized": "green",
+    "true": "green",
+    "yes": "green",
     "idle": "yellow",
     "pending": "yellow",
     "paused": "yellow",
     "waiting": "yellow",
+    "degraded": "yellow",
+    "partial": "yellow",
+    "stale": "yellow",
+    "standby": "bright_yellow",
+    "queued": "bright_yellow",
+    "retrying": "bright_yellow",
+    "migrating": "bright_yellow",
     "error": "red",
     "failed": "red",
     "crashed": "red",
     "cancelled": "red",
+    "disabled": "red",
+    "critical": "red",
+    "disconnected": "red",
+    "offline": "red",
+    "invalid": "red",
+    "rejected": "red",
+    "denied": "red",
+    "expired": "red",
+    "broken": "red",
+    "timeout": "red",
+    "missing": "red",
+    "false": "red",
+    "no": "red",
     "stopped": "dim",
     "terminated": "dim",
     "unknown": "dim",
+    "completed": "dim",
+    "done": "dim",
+    "skipped": "dim",
+    "closed": "dim",
+    "archived": "dim",
+    "deprecated": "dim",
 }
 
 # Status text replacements (emoji → text)
@@ -68,7 +119,6 @@ def _format_value(v: object, depth: int = 0) -> str:
     if isinstance(v, dict):
         if depth > 0:
             return _truncate(", ".join(f"{k}={_format_value(sv, depth+1)}" for k, sv in v.items()))
-        # Top-level dict: one line per key
         parts = []
         for dk, dv in v.items():
             if dv is None or dv == "":
@@ -88,6 +138,15 @@ def _format_value(v: object, depth: int = 0) -> str:
     return _truncate(_clean(str(v)))
 
 
+def _color_value(cell: str) -> str:
+    """Apply status color to a value cell based on its content."""
+    key = cell.lower().split()[0] if cell else ""
+    color = STATUS_COLORS.get(key)
+    if color:
+        return f"[{color}]{cell}[/]"
+    return cell
+
+
 def status_style(s: str) -> str:
     """Return Rich color name for a status string."""
     key = s.lower().split()[0] if s else ""
@@ -95,17 +154,22 @@ def status_style(s: str) -> str:
 
 
 def show_table(title: str, columns: list[str], rows: list[list[str]]):
-    """Display a Rich table with automatic status coloring."""
-    table = Table(title=title, border_style="bright_black", show_lines=False)
+    """Display a Rich table — thick borders, white text, status colors."""
+    table = Table(
+        title=title,
+        box=box.HEAVY,
+        border_style="white",
+        show_lines=True,
+        title_style="bold white",
+    )
     for col in columns:
-        table.add_column(col, style="bold" if col in ("ID", "Name", "Key") else "",
-                         max_width=_MAX_VALUE_WIDTH)
+        table.add_column(col, style="bold white", max_width=_MAX_VALUE_WIDTH)
     for row in rows:
         styled = []
         for i, cell in enumerate(row):
             cell = _clean(str(cell))
-            if columns[i].lower() == "status":
-                styled.append(f"[{status_style(cell)}]{cell}[/]")
+            if columns[i].lower() in ("status", "value", "state"):
+                styled.append(_color_value(cell))
             else:
                 styled.append(_truncate(cell))
         table.add_row(*styled)
@@ -113,23 +177,35 @@ def show_table(title: str, columns: list[str], rows: list[list[str]]):
 
 
 def show_kv(title: str, data: dict, skip: set | None = None):
-    """Display key-value pairs as a Rich table with proper formatting."""
+    """Display key-value pairs — thick borders, white text, status colors."""
     if skip is None:
         skip = {"success"}
-    table = Table(title=title, border_style="bright_black", show_lines=True)
-    table.add_column("Field", style="bold", max_width=20)
-    table.add_column("Value", max_width=_MAX_VALUE_WIDTH)
+    table = Table(
+        title=title,
+        box=box.HEAVY,
+        border_style="white",
+        show_lines=True,
+        title_style="bold white",
+    )
+    table.add_column("Field", style="bold white", max_width=20)
+    table.add_column("Value", style="white", max_width=_MAX_VALUE_WIDTH)
     for k, v in data.items():
         if k in skip or v is None or v == "":
             continue
-        table.add_row(_clean(str(k)), _format_value(v))
+        formatted = _format_value(v)
+        table.add_row(_clean(str(k)), _color_value(formatted))
     console.print(table)
 
 
 def show_raw(output: str):
     """Display raw text output in a panel."""
     if output:
-        console.print(Panel(_clean(output), border_style="bright_black"))
+        console.print(Panel(
+            _clean(output),
+            box=box.HEAVY,
+            border_style="white",
+            style="white",
+        ))
 
 
 def spin(msg: str):
@@ -168,11 +244,27 @@ def confirm(label: str, default: bool = False) -> bool:
 
 
 def choose(label: str, choices: list[str]) -> str | None:
-    """Present numbered choices and return selection."""
-    console.print(f"\n[bold]{label}[/]")
+    """fzf selector — falls back to Rich numbered prompt."""
+    if shutil.which("fzf") and len(choices) > 1:
+        try:
+            proc = subprocess.run(
+                ["fzf", "--no-sort", f"--height={min(len(choices) + 4, 20)}",
+                 "--border=bold", f"--border-label= {label} ",
+                 "--border-label-pos=3", f"--color={_FZF_COLORS}",
+                 "--pointer=>", "--no-info"],
+                input="\n".join(choices),
+                capture_output=True, text=True,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc.stdout.strip()
+            return None
+        except Exception:
+            pass
+    # Fallback
+    console.print(f"\n[bold white]{label}[/]")
     for i, c in enumerate(choices, 1):
-        console.print(f"  {i}. {c}")
-    console.print(f"  0. [dim]cancel[/]")
+        console.print(f"  [bold white]{i}.[/] {c}")
+    console.print(f"  [bold white]0.[/] [dim]cancel[/]")
     raw = Prompt.ask("Select", default="0")
     try:
         idx = int(raw)
@@ -186,10 +278,28 @@ def choose(label: str, choices: list[str]) -> str | None:
 
 
 def multi_choose(label: str, choices: list[str]) -> list[str]:
-    """Present choices for multi-select (comma-separated indices)."""
-    console.print(f"\n[bold]{label}[/]")
+    """fzf multi-select — falls back to Rich comma-separated input."""
+    if shutil.which("fzf") and len(choices) > 1:
+        try:
+            proc = subprocess.run(
+                ["fzf", "--multi", "--no-sort",
+                 f"--height={min(len(choices) + 4, 20)}",
+                 "--border=bold", f"--border-label= {label} ",
+                 "--border-label-pos=3", f"--color={_FZF_COLORS}",
+                 "--pointer=>", "--marker=*", "--no-info",
+                 "--header=  space toggle  │  enter confirm  │  esc cancel"],
+                input="\n".join(choices),
+                capture_output=True, text=True,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return [l for l in proc.stdout.strip().split("\n") if l]
+            return []
+        except Exception:
+            pass
+    # Fallback
+    console.print(f"\n[bold white]{label}[/]")
     for i, c in enumerate(choices, 1):
-        console.print(f"  {i}. {c}")
+        console.print(f"  [bold white]{i}.[/] {c}")
     console.print(f"  [dim]Enter comma-separated numbers, or 0 to cancel[/]")
     raw = Prompt.ask("Select", default="0")
     if raw.strip() == "0":

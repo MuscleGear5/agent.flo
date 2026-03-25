@@ -222,15 +222,17 @@ export class OutputFormatter {
     const lines: string[] = [];
     const pad = ' '.repeat(padding);
 
-    // Border characters (Unicode box drawing)
+    // Border characters (Unicode box drawing — HEAVY, matches gum --border thick)
     const borderChars = border ? {
       topLeft: '┏', topRight: '┓', bottomLeft: '┗', bottomRight: '┛',
       horizontal: '━', vertical: '┃',
-      leftT: '┣', rightT: '┫', topT: '┳', bottomT: '┻', cross: '╋'
+      leftT: '┣', rightT: '┫', topT: '┳', bottomT: '┻', cross: '╋',
+      midLeft: '┣', midRight: '┫', midHorizontal: '━', midCross: '╋'
     } : {
       topLeft: '', topRight: '', bottomLeft: '', bottomRight: '',
       horizontal: '', vertical: ' ',
-      leftT: '', rightT: '', topT: '', bottomT: '', cross: ''
+      leftT: '', rightT: '', topT: '', bottomT: '', cross: '',
+      midLeft: '', midRight: '', midHorizontal: '', midCross: ''
     };
 
     // Top border
@@ -253,8 +255,9 @@ export class OutputFormatter {
       }
     }
 
-    // Data rows
-    for (const row of data) {
+    // Data rows with separators between each row
+    for (let ri = 0; ri < data.length; ri++) {
+      const row = data[ri];
       const rowCells = columns.map((col, i) => {
         let value = row[col.key];
 
@@ -270,6 +273,11 @@ export class OutputFormatter {
       }).join(borderChars.vertical);
 
       lines.push(`${borderChars.vertical}${rowCells}${borderChars.vertical}`);
+
+      // Row separator (between data rows, not after last)
+      if (border && ri < data.length - 1) {
+        lines.push(this.createBorderLine(widths, borderChars, 'middle', padding));
+      }
     }
 
     // Bottom border
@@ -289,7 +297,7 @@ export class OutputFormatter {
     data: Record<string, unknown>[],
     maxWidth?: number
   ): number[] {
-    const widths = columns.map((col, i) => {
+    const widths = columns.map((col) => {
       // Start with header width
       let width = col.header.length;
 
@@ -498,7 +506,6 @@ export class Progress {
   private width: number;
   private startTime: number;
   private formatter: OutputFormatter;
-  private showPercentage: boolean;
   private showETA: boolean;
   private lastRender: string = '';
 
@@ -507,7 +514,6 @@ export class Progress {
     this.current = options.current ?? 0;
     this.total = options.total;
     this.width = options.width ?? 40;
-    this.showPercentage = options.showPercentage ?? true;
     this.showETA = options.showETA ?? true;
     this.startTime = Date.now();
   }
