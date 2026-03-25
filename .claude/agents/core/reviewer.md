@@ -17,6 +17,7 @@ capabilities:
 priority: medium
 hooks:
   pre: |
+    TASK="${TASK:-${CLAUDE_TASK_DESCRIPTION:-${1:-unknown}}}"
     echo "👀 Reviewer agent analyzing: $TASK"
 
     # V3: Initialize task with hooks system

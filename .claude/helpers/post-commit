@@ -5,12 +5,15 @@
 COMMIT_HASH=$(git rev-parse HEAD)
 COMMIT_MSG=$(git log -1 --pretty=%B)
 
-echo "📊 Recording commit metrics..."
+echo "Recording commit metrics..."
+
+# Escape commit message for safe shell and JSON usage
+escaped_msg=$(printf '%s' "$COMMIT_MSG" | jq -Rs . | sed 's/^"//;s/"$//')
 
 # Notify claude-flow of commit
 npx @claude-flow/cli hooks notify \
-  --message "Commit: $COMMIT_MSG" \
+  --message "Commit: ${COMMIT_MSG//\"/\\\"}" \
   --level info \
-  --metadata '{"hash": "'$COMMIT_HASH'"}' 2>/dev/null || true
+  --metadata "{\"hash\": \"$COMMIT_HASH\", \"message\": \"$escaped_msg\"}" 2>/dev/null || true
 
-echo "✅ Commit recorded"
+echo "Commit recorded"

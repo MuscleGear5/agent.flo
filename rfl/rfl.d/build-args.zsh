@@ -195,10 +195,18 @@ build_args() {
       [[ -n "$filter" ]] && args="${filter// /__RFL_SP__}"
       ;;
     neural:train)
-      local -a opts=()
-      opts=($(gum choose --no-limit --header="Training options" --header.foreground=7 \
-        -- "--epochs 10" "--batch-size 32" "--learning-rate 0.001"))
-      args="${(j: :)opts}"
+      local mtype=$(gum choose --header="Model type" --header.foreground=7 \
+        -- "transformer" "moe" "classifier" "embedding")
+      [[ -n "$mtype" ]] && args="--type $mtype"
+      local epochs=$(gum input --placeholder "10" --value "10" \
+        --header "Epochs" --header.foreground=245 --width 30)
+      [[ -n "$epochs" ]] && args+=" --epochs $epochs"
+      local batch=$(gum input --placeholder "32" --value "32" \
+        --header "Batch size" --header.foreground=245 --width 30)
+      [[ -n "$batch" ]] && args+=" --batch-size $batch"
+      local lr=$(gum input --placeholder "0.001" --value "0.001" \
+        --header "Learning rate" --header.foreground=245 --width 30)
+      [[ -n "$lr" ]] && args+=" --learning-rate $lr"
       ;;
     neural:predict)
       local input=$(gum input --placeholder "input data or pattern" \

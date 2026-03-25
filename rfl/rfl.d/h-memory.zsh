@@ -143,8 +143,13 @@ print(f'  {d.get(\"value\", d.get(\"content\", d.get(\"data\",\"\")))}')
         echo "$_out" | python3 -c "
 ${_RFL_PYLIB}
 d=pj(sys.stdin.read())
+rows=[]
 for k,v in d.items():
-    if k not in ('success',): print(f'  {k}: {v}')
+    if k not in ('success',) and v not in (None,''):
+        if isinstance(v,float): v=f'{v:.4f}'
+        rows.append([k, sc(str(v))])
+if rows: print(tbl(['Field','Value'], rows))
+else: print('  (no data)')
 " 2>/dev/null
       else
         print -P "  %F{245}(no data)%f"

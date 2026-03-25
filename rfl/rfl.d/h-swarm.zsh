@@ -36,8 +36,11 @@ n_i=len([a for a in agents if a.get('status')=='idle'])
 n_tp=len([t for t in tl if t.get('status') in ('in_progress','running','active')])
 n_pe=len([t for t in tl if t.get('status') in ('pending','queued')])
 n_do=len([t for t in tl if t.get('status')=='completed'])
-print(f'  Agents:  {GR}{n_a}{R} active  {YL}{n_i}{R} idle  {GY}{len(agents)-n_a-n_i}{R} other')
-print(f'  Tasks:   {GR}{n_tp}{R} active  {OR}{n_pe}{R} pending  {GY}{n_do}{R} done')
+srows=[
+  ['Agents', f'{GR}{n_a}{R} active  {YL}{n_i}{R} idle  {GY}{len(agents)-n_a-n_i}{R} other'],
+  ['Tasks',  f'{GR}{n_tp}{R} active  {OR}{n_pe}{R} pending  {GY}{n_do}{R} done'],
+]
+print(tbl(['','Summary'], srows))
 print()
 if agents:
     print(tbl(['Status','Type','ID'],[[sc(a.get('status','?')),a.get('agentType',a.get('type','?')),a.get('agentId',a.get('id','?'))] for a in agents]))

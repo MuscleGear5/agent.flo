@@ -28,9 +28,11 @@ pool=pj(parts[1] if len(parts)>1 else '')
 all_agents=pool.get('agents',[])
 agents=[a for a in all_agents if not (a.get('status','')=='unknown' and a.get('agentType','')=='worker')]
 if hm:
+    hrows=[]
     for k,label in [('swarmId','Hive'),('status','Status'),('topology','Topology'),('agentCount','Agents')]:
         v=hm.get(k,'')
-        if v is not None and v!='': print(f'  {label+\":\":<12}{sc(str(v))}')
+        if v is not None and v!='': hrows.append([label, sc(str(v))])
+    if hrows: print(tbl(['Field','Value'], hrows))
     print()
 if agents:
     rows=[[sc(a.get('status','?')),a.get('agentType',a.get('type','?')),a.get('agentId',a.get('id','?'))] for a in agents]

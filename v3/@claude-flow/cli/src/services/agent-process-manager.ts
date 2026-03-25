@@ -111,42 +111,13 @@ export class AgentProcessManager extends EventEmitter {
       }
     }
 
-    const rolePrompt = config.systemPrompt
-      || AGENT_ROLE_PROMPTS[config.agentType]
-      || `You are a ${config.agentType} agent. Execute assigned tasks efficiently.`;
-
-    const prompt = [
-      rolePrompt,
-      '',
-      `Agent ID: ${config.agentId}`,
-      `Type: ${config.agentType}`,
-      `Model: ${config.model}`,
-      '',
-      'Waiting for task assignment. Respond with "READY" to confirm initialization.',
-    ].join('\n');
-
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      CLAUDE_CODE_HEADLESS: 'true',
-      ANTHROPIC_MODEL: MODEL_IDS[config.model],
-    };
-
-    if (config.sandbox && config.sandbox !== 'disabled') {
-      env.CLAUDE_CODE_SANDBOX_MODE = config.sandbox;
-    }
-
-    const child = spawn('claude', ['--print', prompt], {
-      cwd: this.projectRoot,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: false,
-    });
-
+    // Register agent — actual task execution spawns fresh claude processes per task
+    // This avoids the problem of a single long-running process that exits after init
     const agent: RunningAgent = {
       config,
-      pid: child.pid || 0,
-      process: child,
-      status: 'starting',
+      pid: process.pid,  // Use current process PID as marker
+      process: null as unknown as ChildProcess,
+      status: 'idle',
       startedAt: new Date(),
       taskCount: 0,
       currentTask: null,
@@ -154,76 +125,72 @@ export class AgentProcessManager extends EventEmitter {
       lastError: '',
     };
 
-    // Collect output
-    let initOutput = '';
-    child.stdout?.on('data', (data: Buffer) => {
-      const chunk = data.toString();
-      agent.lastOutput = chunk.slice(-2000);  // Keep last 2KB
-      initOutput += chunk;
-      this.log(config.agentId, 'stdout', chunk);
-      this.emit('agent:output', { agentId: config.agentId, data: chunk });
-    });
-
-    child.stderr?.on('data', (data: Buffer) => {
-      const chunk = data.toString();
-      agent.lastError = chunk.slice(-2000);
-      this.log(config.agentId, 'stderr', chunk);
-    });
-
-    child.on('exit', (code, signal) => {
-      agent.status = 'dead';
-      agent.process = null as unknown as ChildProcess;
-      this.log(config.agentId, 'exit', `code=${code} signal=${signal}`);
-      this.emit('agent:exit', { agentId: config.agentId, code, signal });
-      this.saveState();
-    });
-
-    child.on('error', (err) => {
-      agent.status = 'dead';
-      agent.lastError = err.message;
-      this.log(config.agentId, 'error', err.message);
-      this.emit('agent:error', { agentId: config.agentId, error: err.message });
-    });
-
     this.agents.set(config.agentId, agent);
     this.taskQueue.set(config.agentId, []);
 
-    // Wait briefly for initialization
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        agent.status = 'idle';
-        resolve();
-      }, 3000);
-
-      const checkReady = () => {
-        if (initOutput.includes('READY') || initOutput.length > 0) {
-          clearTimeout(timeout);
-          agent.status = 'idle';
-          resolve();
-        }
-      };
-
-      child.stdout?.on('data', checkReady);
-    });
-
+    this.log(config.agentId, 'spawn', `Registered ${config.agentType} agent (model: ${config.model})`);
     this.saveState();
-    this.emit('agent:spawned', { agentId: config.agentId, pid: agent.pid, model: config.model });
+    this.emit('agent:spawned', { agentId: config.agentId, model: config.model });
     return agent;
   }
 
   // ── Execute Task ─────────────────────────────────────
 
   async executeTask(agentId: string, taskId: string, description: string): Promise<TaskExecution> {
-    const agent = this.agents.get(agentId);
-    if (!agent || agent.status === 'dead') {
-      // Agent not running — spawn on demand with task
-      throw new Error(`Agent ${agentId} is not running. Spawn it first.`);
+    // Sanitize inputs at system boundary
+    const MAX_DESC_LENGTH = 10000;
+    const sanitizedDescription = description
+      .slice(0, MAX_DESC_LENGTH)
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ''); // strip control chars except \n\r\t
+
+    // Validate taskId format
+    if (!/^[\w-]+$/.test(taskId)) {
+      throw new Error(`Invalid taskId format: ${taskId}`);
+    }
+
+    // Look up agent from in-memory map OR from JSON store
+    let agent = this.agents.get(agentId);
+
+    if (!agent) {
+      // Try loading from agent store (CRUD records)
+      const agentStorePath = join(this.projectRoot, '.claude-flow', 'agents', 'store.json');
+      try {
+        if (existsSync(agentStorePath)) {
+          const store = JSON.parse(readFileSync(agentStorePath, 'utf-8'));
+          const record = store.agents?.[agentId];
+          if (record && record.status !== 'terminated') {
+            // Create a lightweight entry from the store record
+            agent = {
+              config: {
+                agentId,
+                agentType: record.agentType || 'coder',
+                model: (record.model as AgentModel) || 'sonnet',
+              },
+              pid: 0,
+              process: null as unknown as ChildProcess,
+              status: 'idle',
+              startedAt: new Date(record.createdAt || Date.now()),
+              taskCount: record.taskCount || 0,
+              currentTask: null,
+              lastOutput: '',
+              lastError: '',
+            };
+            this.agents.set(agentId, agent);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found. Spawn it first with agent_spawn.`);
     }
 
     const execution: TaskExecution = {
       taskId,
       agentId,
-      description,
+      description: sanitizedDescription,
       status: 'running',
       startedAt: new Date(),
     };
@@ -235,14 +202,19 @@ export class AgentProcessManager extends EventEmitter {
     const timeoutMs = agent.config.timeoutMs || 5 * 60 * 1000;
     const model = agent.config.model;
 
-    // Build the task prompt
+    // Build the task prompt with agent role context
+    const rolePrompt = agent.config.systemPrompt
+      || AGENT_ROLE_PROMPTS[agent.config.agentType]
+      || `You are a ${agent.config.agentType} agent.`;
+
     const taskPrompt = [
-      `Execute the following task:`,
+      rolePrompt,
       '',
       `Task ID: ${taskId}`,
-      `Description: ${description}`,
+      `Description: ${sanitizedDescription}`,
       '',
-      `Work in ${this.projectRoot}. Output your results clearly.`,
+      `Working directory: ${this.projectRoot}`,
+      'Execute the task and output your results clearly.',
     ].join('\n');
 
     const env: Record<string, string> = {
@@ -268,7 +240,10 @@ export class AgentProcessManager extends EventEmitter {
 
       child.stdout?.on('data', (data: Buffer) => {
         stdout += data.toString();
-        agent.lastOutput = stdout.slice(-2000);
+        const currentAgent = this.agents.get(agentId);
+        if (currentAgent) {
+          currentAgent.lastOutput = stdout.slice(-2000);
+        }
         this.emit('task:output', { agentId, taskId, data: data.toString() });
       });
 
@@ -288,8 +263,11 @@ export class AgentProcessManager extends EventEmitter {
           execution.error = stderr || `Process exited with code ${code}`;
         }
 
-        agent.status = 'idle';
-        agent.currentTask = null;
+        const currentAgent = this.agents.get(agentId);
+        if (currentAgent) {
+          currentAgent.status = 'idle';
+          currentAgent.currentTask = null;
+        }
         this.completedTasks.set(taskId, execution);
         this.saveState();
         this.emit('task:complete', { agentId, taskId, status: execution.status });
@@ -301,14 +279,17 @@ export class AgentProcessManager extends EventEmitter {
         execution.status = 'failed';
         execution.error = err.message;
         execution.completedAt = new Date();
-        agent.status = 'idle';
-        agent.currentTask = null;
+        const currentAgent = this.agents.get(agentId);
+        if (currentAgent) {
+          currentAgent.status = 'idle';
+          currentAgent.currentTask = null;
+        }
         this.completedTasks.set(taskId, execution);
         this.saveState();
         resolve(execution);
       });
 
-      this.log(agentId, 'task-start', `${taskId}: ${description}`);
+      this.log(agentId, 'task-start', `${taskId}: ${sanitizedDescription}`);
     });
   }
 
@@ -431,10 +412,25 @@ export class AgentProcessManager extends EventEmitter {
     try {
       if (existsSync(this.stateFile)) {
         const data = JSON.parse(readFileSync(this.stateFile, 'utf-8'));
-        // Mark all previously running agents as dead (they can't survive a restart)
+        // Restore all registered (non-terminated) agents
+        // Agents are on-demand — executeTask spawns a fresh process per task
         for (const a of data.agents || []) {
-          if (a.status !== 'dead') {
-            a.status = 'dead';
+          if (a.status !== 'terminated') {
+            this.agents.set(a.agentId, {
+              config: {
+                agentId: a.agentId,
+                agentType: a.agentType,
+                model: a.model || 'sonnet',
+              },
+              pid: a.pid || 0,
+              process: null as unknown as ChildProcess,
+              status: 'idle',
+              startedAt: new Date(a.startedAt),
+              taskCount: a.taskCount || 0,
+              currentTask: null,
+              lastOutput: '',
+              lastError: '',
+            });
           }
         }
         // Restore completed tasks
@@ -446,6 +442,7 @@ export class AgentProcessManager extends EventEmitter {
       // Fresh start
     }
   }
+
 }
 
 // ── Singleton ──────────────────────────────────────────

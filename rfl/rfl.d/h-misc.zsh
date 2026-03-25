@@ -16,11 +16,13 @@ _rfl_run_misc() {
 ${_RFL_PYLIB}
 txt=sys.stdin.read(); d=pj(txt)
 if d:
+  rows=[]
   run=d.get('running',False)
-  print(f'  status: {GR}running{R}' if run else f'  status: {RD}stopped{R}')
+  rows.append(['status', (GR+'running'+R) if run else (RD+'stopped'+R)])
   for k,v in d.items():
     if k=='running': continue
-    if v is not None: print(f'  {k}: {CY}{v}{R}')
+    if v is not None: rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
 " 2>/dev/null
       echo ""
       ;;
@@ -38,8 +40,10 @@ if d:
 ${_RFL_PYLIB}
 txt=sys.stdin.read(); d=pj(txt)
 if d:
+  rows=[]
   for k,v in d.items():
-    if v is not None: print(f'  {k}: {CY}{v}{R}')
+    if v is not None: rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
 " 2>/dev/null
       echo ""
       ;;
@@ -106,8 +110,12 @@ if hooks:
 ${_RFL_PYLIB}
 txt=sys.stdin.read(); d=pj(txt)
 if d:
+  rows=[]
   for k,v in d.items():
-    if k not in ('success',) and v is not None: print(f'  {k}: {CY}{v}{R}')
+    if k not in ('success',) and v is not None:
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Metric','Value'], rows))
 " 2>/dev/null
       echo ""
       ;;

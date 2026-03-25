@@ -528,4 +528,34 @@ export const neuralTools: MCPTool[] = [
       };
     },
   },
+  {
+    name: 'neural_list',
+    description: 'List all trained neural models',
+    category: 'neural',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['ready', 'training', 'error', 'untrained'], description: 'Filter by status' },
+      },
+    },
+    handler: async (input) => {
+      const store = loadNeuralStore();
+      let models = Object.values(store.models);
+      if (input.status) {
+        models = models.filter(m => m.status === input.status);
+      }
+      return {
+        success: true,
+        total: models.length,
+        models: models.map(m => ({
+          id: m.id,
+          type: m.type,
+          status: m.status,
+          accuracy: m.accuracy,
+          epochs: m.epochs,
+          trainedAt: m.trainedAt || '',
+        })),
+      };
+    },
+  },
 ];

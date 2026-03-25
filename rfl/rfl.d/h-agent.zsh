@@ -33,12 +33,13 @@ except: pass
       echo ""
       local _as_raw _table
       _as_raw=$(_rfl_spin "Loading..." ruflo mcp exec --tool agent_list)
-      _table=$(printf '%s' "$_as_raw" | python3 -c "
+      _table=$(printf '%s' "$_as_raw" | AID="$aid" python3 -c "
 ${_RFL_PYLIB}
+import os; aid=os.environ['AID']
 txt=sys.stdin.read()
 try: d=pj(txt)
 except: d={}
-a=next((x for x in d.get('agents',[]) if x.get('agentId',x.get('id',''))=='$aid'),None)
+a=next((x for x in d.get('agents',[]) if x.get('agentId',x.get('id',''))==aid),None)
 if a:
     print('Field|Value')
     for k,v in a.items():
@@ -101,8 +102,13 @@ if a:
 ${_RFL_PYLIB}
 try:
   d=pj(sys.stdin.read())
+  rows=[]
   for k,v in d.items():
-    if k not in ('success',): print(f'  {k}: {v}')
+    if k not in ('success',) and v not in (None,''):
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+  else: print('  (no data)')
 except: pass
 " 2>/dev/null
       else
@@ -115,9 +121,9 @@ except: pass
       echo ""
       local _ah_out _table
       _ah_out=$(_rfl_spin "Checking health..." ruflo mcp exec --tool agent_list)
-      _table=$(echo "$_ah_out" | python3 -c "
+      _table=$(echo "$_ah_out" | AID="$aid" python3 -c "
 ${_RFL_PYLIB}
-aid='$aid'
+import os; aid=os.environ['AID']
 txt=sys.stdin.read()
 d=pj(txt)
 a=next((x for x in d.get('agents',[]) if x.get('agentId',x.get('id',''))==aid),None)

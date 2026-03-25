@@ -20,7 +20,7 @@ case "$1" in
     ;;
 
   "statusline"|"sl")
-    ".claude/statusline.sh"
+    node "$HELPERS_DIR/statusline.cjs"
     ;;
 
   "update")
@@ -46,7 +46,7 @@ case "$1" in
     "$HELPERS_DIR/v3-quick-status.sh"
     echo ""
     echo "📺 Full Statusline:"
-    ".claude/statusline.sh"
+    node "$HELPERS_DIR/statusline.cjs"
     ;;
 
   "init")

@@ -83,9 +83,12 @@ except Exception as e: print(f'ERR: {e}',file=sys.stderr)
 ${_RFL_PYLIB}
 try:
   txt=sys.stdin.read(); d=pj(txt)
+  rows=[]
   for k in ('sessionId','name','status','createdAt','agentCount','taskCount'):
     v=d.get(k,'')
-    if v: print(f'  {k}: {v}')
+    if v: rows.append([k, sc(str(v))])
+  if rows: print(tbl(['Field','Value'], rows))
+  else: print('  (no active session)')
 except: pass
 " 2>/dev/null
       else

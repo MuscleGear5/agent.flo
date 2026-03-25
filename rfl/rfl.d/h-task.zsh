@@ -33,10 +33,11 @@ except Exception as e: print('  (error: '+str(e)+')')
       echo ""
       local _ts_raw _table
       _ts_raw=$(_rfl_spin "Loading..." ruflo mcp exec --tool task_list)
-      _table=$(printf '%s' "$_ts_raw" | python3 -c "
+      _table=$(printf '%s' "$_ts_raw" | TID="$tid" python3 -c "
 ${_RFL_PYLIB}
+import os; tid=os.environ['TID']
 d=pj(sys.stdin.read())
-t=next((x for x in d.get('tasks',[]) if x.get('taskId',x.get('id',''))=='$tid'),None)
+t=next((x for x in d.get('tasks',[]) if x.get('taskId',x.get('id',''))==tid),None)
 if t:
     print('Field|Value')
     for k,v in t.items():

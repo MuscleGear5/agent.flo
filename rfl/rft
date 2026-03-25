@@ -14,7 +14,7 @@ SCRIPT_DIR="${0:A:h}"
 RUFLO_PROJECT="$SCRIPT_DIR/ruflo"
 
 # ── API config ──────────────────────────────────────────────
-DEEPSEEK_KEY=$(grep 'DEEPSEEK_API_KEY=' ~/.keys 2>/dev/null | head -1 | cut -d'"' -f2)
+DEEPSEEK_KEY="${DEEPSEEK_API_KEY:-$(grep 'DEEPSEEK_API_KEY=' ~/.keys 2>/dev/null | head -1 | sed 's/.*=//;s/^"//;s/"$//')}"
 DEEPSEEK_URL="https://api.deepseek.com/chat/completions"
 
 # ── Color palette (matches neon theme) ──────────────────────
@@ -110,7 +110,12 @@ offer_commands() {
             [[ -z "$c" || "$c" == "(skip)" ]] && return
             echo ""
             bright $C_GREEN "▸ $c"
-            ${=c}
+            local -a _parts=("${(z)c}")
+            if [[ "${_parts[1]}" == "ruflo" || "${_parts[1]}" == "rfl" ]]; then
+                "${_parts[@]}"
+            else
+                echo "Blocked: only ruflo/rfl commands allowed" >&2
+            fi
             echo ""
         done
     fi
@@ -305,11 +310,14 @@ call_deepseek() {
             temperature: 0.2
         }' > "$response_file.req"
 
+    local _authfile=$(mktemp)
+    chmod 600 "$_authfile"
+    printf 'header = "Authorization: Bearer %s"\n' "$DEEPSEEK_KEY" > "$_authfile"
     curl -s --max-time 30 "${DEEPSEEK_URL}" \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${DEEPSEEK_KEY}" \
+        -K "$_authfile" \
         -d @"$response_file.req" > "$response_file"
-    rm -f "$response_file.req"
+    rm -f "$response_file.req" "$_authfile"
 
     if [[ ! -s "$response_file" ]]; then
         dim "API error: empty response" >&2
@@ -342,11 +350,14 @@ call_reasoner() {
             ]
         }' > "$response_file.req"
 
+    local _authfile=$(mktemp)
+    chmod 600 "$_authfile"
+    printf 'header = "Authorization: Bearer %s"\n' "$DEEPSEEK_KEY" > "$_authfile"
     curl -s --max-time 120 "${DEEPSEEK_URL}" \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${DEEPSEEK_KEY}" \
+        -K "$_authfile" \
         -d @"$response_file.req" > "$response_file"
-    rm -f "$response_file.req"
+    rm -f "$response_file.req" "$_authfile"
 
     if [[ ! -s "$response_file" ]]; then
         dim "Reasoner: empty response — falling back to chat" >&2
@@ -556,8 +567,12 @@ ONLY return valid JSON, no markdown wrapping."
         case "$action" in
             Execute)
                 echo ""
-                # Safe: split on words, no eval
-                ${=full_cmd}
+                local -a _parts=("${(z)full_cmd}")
+                if [[ "${_parts[1]}" == "ruflo" || "${_parts[1]}" == "rfl" ]]; then
+                    "${_parts[@]}"
+                else
+                    echo "Blocked: only ruflo/rfl commands allowed" >&2
+                fi
                 ;;
             Copy)
                 echo "$full_cmd" | xclip -selection clipboard 2>/dev/null \
@@ -567,14 +582,28 @@ ONLY return valid JSON, no markdown wrapping."
                 ;;
             "Edit & execute")
                 local edited=$(gum input --value "$full_cmd")
-                [[ -n "$edited" ]] && ${=edited}
+                if [[ -n "$edited" ]]; then
+                    local -a _parts=("${(z)edited}")
+                    if [[ "${_parts[1]}" == "ruflo" || "${_parts[1]}" == "rfl" ]]; then
+                        "${_parts[@]}"
+                    else
+                        echo "Blocked: only ruflo/rfl commands allowed" >&2
+                    fi
+                fi
                 ;;
         esac
     else
         echo "Command: $full_cmd"
         echo -n "Execute? [y/N]: "
         read -r yn
-        [[ "$yn" == [yY] ]] && ${=full_cmd}
+        if [[ "$yn" == [yY] ]]; then
+            local -a _parts=("${(z)full_cmd}")
+            if [[ "${_parts[1]}" == "ruflo" || "${_parts[1]}" == "rfl" ]]; then
+                "${_parts[@]}"
+            else
+                echo "Blocked: only ruflo/rfl commands allowed" >&2
+            fi
+        fi
     fi
 }
 

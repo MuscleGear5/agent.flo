@@ -50,10 +50,12 @@ _rfl_run_hive2() {
 ${_RFL_PYLIB}
 try:
   d=pj(sys.stdin.read())
-  print(f'  Decision:    {d.get(\"decision\",d.get(\"result\",\"pending\"))}')
-  print(f'  Votes:       {d.get(\"votes\",d.get(\"participants\",\"?\"))}')
+  rows=[]
+  rows.append(['Decision', sc(str(d.get('decision',d.get('result','pending'))))])
+  rows.append(['Votes', str(d.get('votes',d.get('participants','?')))])
   c=d.get('confidence',d.get('agreement',''))
-  if c: print(f'  Confidence:  {c}')
+  if c: rows.append(['Confidence', str(c)])
+  print(tbl(['Field','Value'], rows))
 except Exception as e: print(f'  [parse error] {e}')
 " 2>/dev/null
       else
@@ -90,11 +92,14 @@ try:
   mems=d.get('memories', d.get('items', d.get('entries',[])))
   if not mems: print('  (empty)')
   else:
+    rows=[]
     for m in mems:
       if isinstance(m, dict):
-        k=m.get('key',m.get('id','?')); v=m.get('value',m.get('content',''))
-        print(f'  {k}: {str(v)[:80]}')
-      else: print(f'  {m}')
+        k=m.get('key',m.get('id','?')); v=str(m.get('value',m.get('content','')))[:80]
+        rows.append([k, sc(v)])
+      else: rows.append([str(m), ''])
+    if rows: print(tbl(['Key','Value'], rows))
+    else: print('  (empty)')
 except Exception as e: print(f'  [parse error] {e}')
 " 2>/dev/null
       else

@@ -21,8 +21,8 @@
 
 import { spawn, execSync, type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
-import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, realpathSync } from 'fs';
+import { join, sep } from 'path';
 import type { WorkerType } from './worker-daemon.js';
 
 // ============================================
@@ -948,6 +948,17 @@ export class HeadlessWorkerExecutor extends EventEmitter {
         const fullPath = join(this.projectRoot, file);
         if (!existsSync(fullPath)) continue;
 
+        // Prevent symlink traversal outside project root
+        try {
+          const resolved = realpathSync(fullPath);
+          const rootResolved = realpathSync(this.projectRoot);
+          if (!resolved.startsWith(rootResolved + sep) && resolved !== rootResolved) {
+            continue; // skip files outside project root (symlink escape)
+          }
+        } catch {
+          continue; // skip unresolvable paths
+        }
+
         const content = readFileSync(fullPath, 'utf-8');
         const truncated = content.slice(0, this.config.maxCharsPerFile);
         const wasTruncated = content.length > this.config.maxCharsPerFile;
@@ -1005,6 +1016,9 @@ export class HeadlessWorkerExecutor extends EventEmitter {
         const isLastPart = remainingParts.length === 1;
 
         for (const entry of entries) {
+          // Skip symlinks to prevent traversal outside project root
+          if (entry.isSymbolicLink()) continue;
+
           // Skip common non-code directories
           if (
             entry.name === 'node_modules' ||
@@ -1129,16 +1143,32 @@ Analyze the above codebase context and provide your response following the forma
         windowsHide: true, // Prevent phantom console windows on Windows
       });
 
+      let stdout = '';
+      let stderr = '';
+      let resolved = false;
+      let timeoutHandle: ReturnType<typeof setTimeout>;
+
+      const cleanup = () => {
+        clearTimeout(timeoutHandle);
+        this.processPool.delete(options.executionId);
+      };
+
       // Setup timeout
-      const timeoutHandle = setTimeout(() => {
-        if (this.processPool.has(options.executionId)) {
-          child.kill('SIGTERM');
-          // Give it a moment to terminate gracefully
-          setTimeout(() => {
-            if (!child.killed) {
-              child.kill('SIGKILL');
-            }
+      timeoutHandle = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          try { child.kill('SIGTERM'); } catch {}
+          // Give 5s for graceful shutdown, then SIGKILL
+          const killTimer = setTimeout(() => {
+            try { if (!child.killed) child.kill('SIGKILL'); } catch {}
           }, 5000);
+          killTimer.unref?.();
+          cleanup();
+          resolve({
+            success: false,
+            output: stdout,
+            error: 'Task timed out',
+          });
         }
       }, options.timeoutMs);
 
@@ -1151,15 +1181,6 @@ Analyze the above codebase context and provide your response following the forma
         timeout: timeoutHandle,
       };
       this.processPool.set(options.executionId, poolEntry);
-
-      let stdout = '';
-      let stderr = '';
-      let resolved = false;
-
-      const cleanup = () => {
-        clearTimeout(timeoutHandle);
-        this.processPool.delete(options.executionId);
-      };
 
       child.stdout?.on('data', (data: Buffer) => {
         const chunk = data.toString();
@@ -1205,21 +1226,6 @@ Analyze the above codebase context and provide your response following the forma
         });
       });
 
-      // Handle timeout
-      setTimeout(() => {
-        if (resolved) return;
-        if (!this.processPool.has(options.executionId)) return;
-
-        resolved = true;
-        child.kill('SIGTERM');
-        cleanup();
-
-        resolve({
-          success: false,
-          output: stdout || stderr,
-          error: `Execution timed out after ${options.timeoutMs}ms`,
-        });
-      }, options.timeoutMs + 100); // Slightly after the kill timeout
     });
   }
 

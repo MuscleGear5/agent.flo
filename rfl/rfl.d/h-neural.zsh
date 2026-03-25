@@ -15,9 +15,16 @@ _rfl_run_neural() {
 ${_RFL_PYLIB}
 try:
   txt=sys.stdin.read(); d=pj(txt)
+  rows=[]
   for k,v in d.items():
     if k not in ('success',) and v not in (None,''):
-      print(f'  {k}: {v}')
+      if isinstance(v,dict): v=', '.join(f'{sk}={sv}' for sk,sv in v.items())
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows:
+    print(tbl(['Field','Value'], rows))
+  else:
+    print('  (no data)')
 except Exception as e: print(f'  [error] {e}')
 " 2>/dev/null
       else
@@ -40,13 +47,16 @@ try:
   if not pats:
     print('  (none)')
   else:
+    rows=[]
     for p in pats:
       if isinstance(p,dict):
         pid=p.get('id',p.get('name','?'))
         ptype=p.get('type','')
-        print(f'  {pid}' + (f'  ({ptype})' if ptype else ''))
+        rows.append([str(pid), sc(str(ptype)) if ptype else ''])
       else:
-        print(f'  {p}')
+        rows.append([str(p), ''])
+    if rows: print(tbl(['ID','Type'], rows))
+    else: print('  (none)')
 except Exception as e: print(f'  [error] {e}')
 " 2>/dev/null
       else
@@ -68,19 +78,24 @@ try:
   txt=sys.stdin.read(); d=pj(txt)
   preds=d.get('predictions', d.get('results', d.get('output',[])))
   if isinstance(preds,list):
+    rows=[]
     for p in preds:
       if isinstance(p,dict):
         label=p.get('label',p.get('class','?'))
         conf=p.get('confidence',p.get('score',''))
-        print(f'  {label}' + (f'  ({conf})' if conf else ''))
+        rows.append([str(label), str(conf) if conf else ''])
       else:
-        print(f'  {p}')
+        rows.append([str(p), ''])
+    if rows: print(tbl(['Label','Confidence'], rows))
   elif preds:
-    print(f'  {preds}')
+    print(tbl(['Prediction'], [[str(preds)]]))
   else:
+    rows=[]
     for k,v in d.items():
       if k not in ('success',) and v not in (None,''):
-        print(f'  {k}: {v}')
+        if isinstance(v,float): v=f'{v:.4f}'
+        rows.append([k, sc(str(v))])
+    if rows: print(tbl(['Field','Value'], rows))
 except Exception as e: print(f'  [error] {e}')
 " 2>/dev/null
       else
@@ -118,12 +133,11 @@ try:
     v=d.get(k,'')
     if v not in (None,'',True):
       if isinstance(v,float): v=f'{v:.4f}'
-      rows.append(f'{k}|{v}')
+      rows.append([k, sc(str(v))])
   if rows:
-    print('Field|Value')
-    for r in rows: print(r)
+    print(tbl(['Field','Value'], rows))
 except Exception as e: print(f'  [error] {e}')
-" 2>/dev/null | gum table --separator '|' --border thick --print
+" 2>/dev/null
       else
         print -P "%F{196}[x] Training failed%f"; echo "$_out"
       fi
@@ -139,14 +153,50 @@ except Exception as e: print(f'  [error] {e}')
 ${_RFL_PYLIB}
 try:
   txt=sys.stdin.read(); d=pj(txt)
+  rows=[]
   for k,v in d.items():
     if k not in ('success',) and v not in (None,''):
-      print(f'  {k}: {v}')
+      if isinstance(v,dict): v=', '.join(f'{sk}={sv}' for sk,sv in v.items())
+      if isinstance(v,float): v=f'{v:.4f}'
+      rows.append([k, sc(str(v))])
+  if rows:
+    print(tbl(['Field','Value'], rows))
+  else:
+    print('  (no data)')
 except Exception as e: print(f'  [error] {e}')
 " 2>/dev/null
       else
         echo "$_out"
       fi
+      ;;
+    list)
+      echo ""
+      print -P "%BNeural Models%b"
+      echo ""
+      local _out
+      _out=$(_rfl_spin "Loading models..." ruflo mcp exec --tool neural_list -p "{}")
+      if [[ "$_out" == *'{'* ]]; then
+        echo "$_out" | python3 -c "
+${_RFL_PYLIB}
+try:
+  txt=sys.stdin.read(); d=pj(txt)
+  ms=d.get('models',[])
+  if not ms:
+    print('  (no models trained)')
+  else:
+    rows=[]
+    for m in ms:
+      mid=m.get('id','?')
+      if len(mid)>20: mid=mid[:8]+'..'+mid[-4:]
+      rows.append([mid, m.get('type',''), sc(str(m.get('status',''))), f\"{m.get('accuracy',0):.4f}\", str(m.get('epochs','')), m.get('trainedAt','')[:16]])
+    print(tbl(['ID','Type','Status','Acc','Ep','Trained'], rows))
+    print(f'  {d.get(\"total\",len(ms))} model(s)')
+except Exception as e: print(f'  [error] {e}')
+" 2>/dev/null
+      else
+        echo "$_out"
+      fi
+      echo ""
       ;;
     *) return 1 ;;
   esac

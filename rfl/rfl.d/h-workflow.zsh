@@ -54,9 +54,9 @@ except Exception as e: print(f'ERR: {e}',file=sys.stderr)
       echo ""
       local _wst_out _table
       _wst_out=$(_rfl_spin "Loading..." ruflo mcp exec --tool workflow_list)
-      _table=$(echo "$_wst_out" | python3 -c "
+      _table=$(echo "$_wst_out" | WID="$wid" python3 -c "
 ${_RFL_PYLIB}
-wid='$wid'
+import os; wid=os.environ['WID']
 txt=sys.stdin.read(); d=pj(txt)
 items=d.get('workflows',d.get('items',[]))
 w=next((x for x in items if x.get('workflowId',x.get('id',''))==wid),None)

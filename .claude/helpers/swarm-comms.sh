@@ -37,10 +37,11 @@ enqueue() {
   local msg_id="msg_$(date +%s%N)"
   local timestamp=$(date +%s)
 
-  # Write to priority queue (non-blocking)
-  cat > "$QUEUE_DIR/${priority}_${msg_id}.json" << EOF
-{"id":"$msg_id","to":"$to","content":"$content","type":"$msg_type","priority":$priority,"timestamp":$timestamp}
-EOF
+  # Write to priority queue (non-blocking, safely escaped via jq)
+  jq -n --arg id "$msg_id" --arg to "$to" --arg content "$content" \
+    --arg type "$msg_type" --argjson priority "$priority" --argjson timestamp "$timestamp" \
+    '{id:$id, to:$to, content:$content, type:$type, priority:$priority, timestamp:$timestamp}' \
+    > "$QUEUE_DIR/${priority}_${msg_id}.json"
 
   echo "$msg_id"
 }

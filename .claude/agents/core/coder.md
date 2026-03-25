@@ -17,6 +17,7 @@ capabilities:
 priority: high
 hooks:
   pre: |
+    TASK="${TASK:-${CLAUDE_TASK_DESCRIPTION:-${1:-unknown}}}"
     echo "💻 Coder agent implementing: $TASK"
 
     # V3: Initialize task with hooks system

@@ -478,7 +478,7 @@ EOF
   "fromName": "$AGENT_NAME",
   "to": "$to_agent",
   "type": "handoff",
-  "content": "Task handoff: $description",
+  "content": "Task handoff: $desc_escaped",
   "priority": "high",
   "timestamp": $timestamp,
   "read": false,
