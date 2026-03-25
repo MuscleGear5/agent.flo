@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from rich import box
 from rich.console import Console
+from rich.columns import Columns
+from rich.rule import Rule
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
@@ -99,6 +101,10 @@ _STATUS_MAP = {
 _MAX_VALUE_WIDTH = 72
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Internal helpers
+# ══════════════════════════════════════════════════════════════════════════
+
 def _clean(s: str) -> str:
     """Strip emojis, replace status symbols with text equivalents."""
     for emoji, replacement in _STATUS_MAP.items():
@@ -153,6 +159,63 @@ def status_style(s: str) -> str:
     return STATUS_COLORS.get(key, "white")
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Box-art: breadcrumbs, sections, footers
+# ══════════════════════════════════════════════════════════════════════════
+
+def breadcrumb(*parts: str):
+    """Print a breadcrumb trail:  pyrfl > agent > status"""
+    trail = " > ".join(parts)
+    console.print(Rule(f"[bold white] {trail} [/]", style="white", characters="━"))
+
+
+def section(title: str):
+    """Print a thin section divider with title."""
+    console.print(Rule(f"[bold white] {title} [/]", style="dim white"))
+
+
+def result_count(n: int, label: str = "items"):
+    """Print a result count badge."""
+    if n == 0:
+        console.print(f"[dim]  0 {label}[/]")
+    else:
+        console.print(f"[bold white]  {n} {label}[/]")
+
+
+# ── Static next-action hints (non-agent commands) ─────────────────────────
+_HINTS: dict[str, list[str]] = {
+    "task_list":     ["rfl task create", "rfl task assign", "rfl task status"],
+    "task_create":   ["rfl task assign", "rfl task list"],
+    "task_status":   ["rfl task complete", "rfl task cancel", "rfl task retry"],
+    "swarm_init":    ["rfl swarm status", "rfl swarm start", "rfl agent list"],
+    "swarm_start":   ["rfl swarm status", "rfl agent list", "rfl task list"],
+    "swarm_status":  ["rfl swarm stop", "rfl agent list", "rfl task list"],
+    "memory_store":  ["rfl memory list", "rfl memory search"],
+    "memory_search": ["rfl memory retrieve", "rfl memory store"],
+    "memory_list":   ["rfl memory search", "rfl memory retrieve", "rfl memory delete"],
+    "neural_train":  ["rfl neural status", "rfl neural patterns", "rfl neural predict"],
+    "neural_status": ["rfl neural train", "rfl neural optimize", "rfl neural patterns"],
+    "session_list":  ["rfl session current", "rfl session restore"],
+    "hive-mind_init":    ["rfl hive-mind status", "rfl hive-mind spawn"],
+    "hive-mind_status":  ["rfl hive-mind consensus", "rfl hive-mind memory"],
+}
+
+
+def footer_hints(cmd: str, sub: str):
+    """Print static next-action hints after a command result."""
+    key = f"{cmd}_{sub}"
+    hints = _HINTS.get(key)
+    if not hints:
+        return
+    parts = [f"[dim]{h}[/]" for h in hints]
+    console.print()
+    console.print(f"[dim]Next:[/]  {'  │  '.join(parts)}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Tables — HEAVY box, white text, status colors
+# ══════════════════════════════════════════════════════════════════════════
+
 def show_table(title: str, columns: list[str], rows: list[list[str]]):
     """Display a Rich table — thick borders, white text, status colors."""
     table = Table(
@@ -174,6 +237,7 @@ def show_table(title: str, columns: list[str], rows: list[list[str]]):
                 styled.append(_truncate(cell))
         table.add_row(*styled)
     console.print(table)
+    result_count(len(rows))
 
 
 def show_kv(title: str, data: dict, skip: set | None = None):
@@ -208,10 +272,57 @@ def show_raw(output: str):
         ))
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Error & status panels
+# ══════════════════════════════════════════════════════════════════════════
+
+def error_panel(msg: str, detail: str = "", params: dict | None = None):
+    """Display an error in a bordered panel with optional context."""
+    lines = [f"[red bold]{msg}[/]"]
+    if detail:
+        lines.append(f"[dim]{detail}[/]")
+    if params:
+        lines.append("")
+        lines.append("[dim]Sent parameters:[/]")
+        for k, v in params.items():
+            lines.append(f"  [bold]{k}[/] = {v}")
+    console.print(Panel(
+        "\n".join(lines),
+        title="[red bold] Error [/]",
+        box=box.HEAVY,
+        border_style="red",
+        padding=(1, 2),
+    ))
+
+
+def success_panel(title: str, msg: str, hints: list[str] | None = None):
+    """Display a success result in a bordered panel with optional hints."""
+    lines = [f"[green bold]{msg}[/]"]
+    if hints:
+        lines.append("")
+        for h in hints:
+            lines.append(f"[dim]  {h}[/]")
+    console.print(Panel(
+        "\n".join(lines),
+        title=f"[green bold] {title} [/]",
+        box=box.HEAVY,
+        border_style="green",
+        padding=(0, 2),
+    ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Spinners & progress
+# ══════════════════════════════════════════════════════════════════════════
+
 def spin(msg: str):
     """Context manager for spinner."""
     return console.status(msg, spinner="dots")
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# Messages
+# ══════════════════════════════════════════════════════════════════════════
 
 def error(msg: str):
     """Print an error message."""
@@ -232,6 +343,10 @@ def warn(msg: str):
     """Print a warning message."""
     console.print(f"[yellow bold]\\[!][/] {msg}")
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# Prompts & selectors
+# ══════════════════════════════════════════════════════════════════════════
 
 def prompt(label: str, default: str = "") -> str:
     """Prompt for input with Rich."""
@@ -292,7 +407,7 @@ def multi_choose(label: str, choices: list[str]) -> list[str]:
                 capture_output=True, text=True,
             )
             if proc.returncode == 0 and proc.stdout.strip():
-                return [l for l in proc.stdout.strip().split("\n") if l]
+                return [ln for ln in proc.stdout.strip().split("\n") if ln]
             return []
         except Exception:
             pass

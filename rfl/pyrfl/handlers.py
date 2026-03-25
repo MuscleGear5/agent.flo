@@ -74,10 +74,14 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
     """
     handler_key = f"{cmd}_{sub}"
 
+    # Breadcrumb header
+    ui.breadcrumb("pyrfl", cmd, sub)
+
     # 1. Check for custom handler first
     custom = CUSTOM_HANDLERS.get(handler_key)
     if custom:
-        custom(args or _args_from_list(cmd, sub, extra_args))
+        cresult = custom(args or _args_from_list(cmd, sub, extra_args))
+        _maybe_followup(cmd, sub, cresult)
         return
 
     # 2. CLI passthrough — use ruflo CLI directly (rich formatted output)
@@ -96,15 +100,19 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
         if raw:
             ui.console.print(raw)
         elif result.get("error"):
-            ui.error(result["error"])
+            ui.error_panel(result["error"], detail=f"ruflo {cmd} {sub}")
         else:
             _auto_display(cmd, sub, result)
+        _maybe_followup(cmd, sub, result)
         return
 
     # 3. Generic MCP handler
     cmd_def = COMMANDS.get(cmd, {}).get("subs", {}).get(sub)
     if not cmd_def:
-        ui.error(f"Unknown command: {cmd} {sub}")
+        ui.error_panel(
+            f"Unknown command: {cmd} {sub}",
+            detail="Check available commands with: rfl --list",
+        )
         return
 
     tool = cmd_def["tool"]
@@ -113,8 +121,8 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
     # If command needs params and none provided, prompt interactively
     # Skip prompting for commands with all-optional params or when not on a TTY
     if not params and "params" in cmd_def:
-        handler_key = f"{cmd}_{sub}"
-        if handler_key not in _OPTIONAL_PARAMS:
+        handler_key_local = f"{cmd}_{sub}"
+        if handler_key_local not in _OPTIONAL_PARAMS:
             if sys.stdin.isatty():
                 params = _prompt_params(cmd_def)
                 if params is None:  # User cancelled
@@ -127,10 +135,15 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
 
     if not result:
         ui.info("(no data)")
+        _maybe_followup(cmd, sub, {})
         return
 
     if result.get("error"):
-        ui.error(result["error"])
+        ui.error_panel(
+            result["error"],
+            detail=f"MCP tool: {tool}",
+            params=params if params else None,
+        )
         raw = result.get("raw", "")
         if raw:
             ui.show_raw(raw)
@@ -138,6 +151,7 @@ def run_command(cmd: str, sub: str, extra_args: list[str] | None = None,
 
     # Auto-format result based on content
     _auto_display(cmd, sub, result)
+    _maybe_followup(cmd, sub, result)
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +450,133 @@ def _auto_display(cmd: str, sub: str, result: dict):
 
 
 # ---------------------------------------------------------------------------
+# Dynamic follow-up actions (agent commands)
+# ---------------------------------------------------------------------------
+# After an agent subcommand completes, inspect the result and offer a
+# context-aware fzf menu of next actions.  Esc exits.  Non-TTY is skipped.
+
+_MAX_FOLLOWUP_DEPTH = 3
+
+
+def _extract_agent_states(result: dict) -> dict[str, list[str]]:
+    """Bucket agent IDs by status from a result containing agents list."""
+    buckets: dict[str, list[str]] = {}
+    for a in result.get("agents", []):
+        aid = a.get("agentId", a.get("id", ""))
+        status = (a.get("status") or "unknown").lower()
+        buckets.setdefault(status, []).append(aid)
+    return buckets
+
+
+def _agent_followup_actions(sub: str, result: dict) -> list[tuple[str, str, str, dict]]:
+    """Return list of (label, target_cmd, target_sub, prefill_args) tuples.
+
+    Rules depend on which subcommand ran and what the result contains.
+    """
+    actions: list[tuple[str, str, str, dict]] = []
+    states = _extract_agent_states(result)
+    all_ids = [aid for ids in states.values() for aid in ids]
+    idle_ids = states.get("idle", []) + states.get("spawned", [])
+    running_ids = states.get("running", []) + states.get("active", [])
+    error_ids = states.get("error", []) + states.get("crashed", [])
+    single_id = result.get("agentId", result.get("id", ""))
+    single_status = (result.get("status") or "").lower()
+    agent_type = result.get("agentType", result.get("type", ""))
+
+    if sub == "list":
+        if idle_ids:
+            actions.append(("assign task", "task", "assign", {}))
+        if all_ids:
+            actions.append(("status", "agent", "status", {}))
+            actions.append(("health", "agent", "health", {}))
+            actions.append(("stop", "agent", "stop", {}))
+        if error_ids:
+            actions.append(("stop errored", "agent", "stop", {}))
+        actions.append(("spawn new", "agent", "spawn", {}))
+
+    elif sub == "spawn":
+        if single_id:
+            actions.append(("status", "agent", "status", {"agentId": single_id}))
+            actions.append(("assign task", "task", "assign", {"agentId": single_id}))
+        actions.append(("list all", "agent", "list", {}))
+
+    elif sub == "status":
+        if single_id:
+            if single_status in ("idle", "spawned"):
+                actions.append(("assign task", "task", "assign", {"agentId": single_id}))
+            actions.append(("health", "agent", "health", {"agentId": single_id}))
+            actions.append(("metrics", "agent", "metrics", {"agentId": single_id}))
+            if single_status in ("error", "crashed"):
+                actions.append(("stop", "agent", "stop", {"agentId": single_id}))
+                if agent_type:
+                    actions.append(("respawn", "agent", "spawn", {"agentType": agent_type}))
+            elif single_status not in ("terminated", "stopped"):
+                actions.append(("stop", "agent", "stop", {"agentId": single_id}))
+
+    elif sub == "stop":
+        actions.append(("list", "agent", "list", {}))
+        actions.append(("spawn new", "agent", "spawn", {}))
+
+    elif sub == "health":
+        health = result.get("health", result.get("score", 1))
+        if isinstance(health, (int, float)) and health < 0.5:
+            if single_id:
+                actions.append(("stop", "agent", "stop", {"agentId": single_id}))
+                if agent_type:
+                    actions.append(("respawn", "agent", "spawn", {"agentType": agent_type}))
+                actions.append(("metrics", "agent", "metrics", {"agentId": single_id}))
+        else:
+            if single_id:
+                actions.append(("assign task", "task", "assign", {"agentId": single_id}))
+                actions.append(("status", "agent", "status", {"agentId": single_id}))
+
+    elif sub == "metrics":
+        if single_id:
+            actions.append(("status", "agent", "status", {"agentId": single_id}))
+            actions.append(("health", "agent", "health", {"agentId": single_id}))
+        actions.append(("list", "agent", "list", {}))
+
+    elif sub in ("pool", "logs"):
+        actions.append(("spawn", "agent", "spawn", {}))
+        actions.append(("list", "agent", "list", {}))
+        if single_id:
+            actions.append(("health", "agent", "health", {"agentId": single_id}))
+
+    return actions
+
+
+def _agent_followups(sub: str, result: dict | None, depth: int = 0):
+    """Show dynamic follow-up menu after an agent command.  Loops up to _MAX_FOLLOWUP_DEPTH."""
+    if not sys.stdin.isatty() or depth >= _MAX_FOLLOWUP_DEPTH:
+        return
+    if result is None or result.get("error"):
+        return
+
+    actions = _agent_followup_actions(sub, result)
+    if not actions:
+        return
+
+    labels = [a[0] for a in actions]
+    sel = ui.choose("Next", labels)
+    if not sel:
+        return
+
+    idx = labels.index(sel)
+    _, target_cmd, target_sub, prefill = actions[idx]
+
+    # Execute the selected action
+    run_command(target_cmd, target_sub, args=prefill if prefill else None)
+
+
+def _maybe_followup(cmd: str, sub: str, result: dict | None, depth: int = 0):
+    """Dispatch to agent followups if applicable, otherwise show static hints."""
+    if cmd == "agent":
+        _agent_followups(sub, result, depth)
+    else:
+        ui.footer_hints(cmd, sub)
+
+
+# ---------------------------------------------------------------------------
 # Custom handlers -- commands that need interactive prompts or special logic
 # ---------------------------------------------------------------------------
 
@@ -539,7 +680,7 @@ def _handle_swarm_start(args: dict):
 
 # ── Agent ──────────────────────────────────────────────────────────────────
 
-def _handle_agent_spawn(args: dict):
+def _handle_agent_spawn(args: dict) -> dict | None:
     """Custom agent spawn with type selection."""
     AGENT_TYPES = [
         "coder", "researcher", "tester", "reviewer", "architect",
@@ -549,7 +690,7 @@ def _handle_agent_spawn(args: dict):
     ]
     atype = args.get("agentType") or ui.choose("Agent type", AGENT_TYPES)
     if not atype:
-        return
+        return None
     task = args.get("task") or Prompt.ask("Task description (optional)", default="")
     agent_id = args.get("agentId") or Prompt.ask("Agent ID (optional)", default="")
     params: dict = {"agentType": atype}
@@ -564,59 +705,70 @@ def _handle_agent_spawn(args: dict):
         ui.success(f"Agent spawned: {aid} ({atype})")
     else:
         ui.error(result.get("error", "Spawn failed"))
+    result["agentType"] = atype
+    return result
 
 
-def _handle_agent_status(args: dict):
+def _handle_agent_status(args: dict) -> dict | None:
     """Agent status with picker."""
     aid = args.get("agentId") or _pick_agent("Agent status")
     if not aid:
-        return
+        return None
     with ui.spin(f"Getting status for {aid}..."):
         result = mcp_exec("agent_status", {"agentId": aid})
     _auto_display("agent", "status", result)
+    result.setdefault("agentId", aid)
+    return result
 
 
-def _handle_agent_stop(args: dict):
+def _handle_agent_stop(args: dict) -> dict | None:
     """Agent stop with picker."""
     aid = args.get("agentId") or _pick_agent("Stop agent")
     if not aid:
-        return
+        return None
     with ui.spin(f"Stopping {aid}..."):
         result = mcp_exec("agent_terminate", {"agentId": aid})
     if result.get("success"):
         ui.success(f"Agent {aid} stopped")
     else:
         ui.error(result.get("error", f"Failed to stop {aid}"))
+    return result
 
 
-def _handle_agent_metrics(args: dict):
+def _handle_agent_metrics(args: dict) -> dict | None:
     """Agent metrics with picker."""
     aid = args.get("agentId") or _pick_agent("Agent metrics")
     if not aid:
-        return
+        return None
     with ui.spin(f"Getting metrics for {aid}..."):
         result = mcp_exec("system_metrics", {"agentId": aid})
     _auto_display("agent", "metrics", result)
+    result.setdefault("agentId", aid)
+    return result
 
 
-def _handle_agent_logs(args: dict):
+def _handle_agent_logs(args: dict) -> dict | None:
     """Agent logs with picker."""
     aid = args.get("agentId") or _pick_agent("Agent logs")
     if not aid:
-        return
+        return None
     with ui.spin(f"Getting logs for {aid}..."):
         result = mcp_exec("agent_status", {"agentId": aid})
     _auto_display("agent", "logs", result)
+    result.setdefault("agentId", aid)
+    return result
 
 
-def _handle_agent_health(args: dict):
+def _handle_agent_health(args: dict) -> dict | None:
     """Agent health with picker."""
     aid = args.get("agentId") or _pick_agent("Agent health")
     if not aid:
-        return
+        return None
     with ui.spin(f"Checking health for {aid}..."):
         result = mcp_exec("agent_health", {"agentId": aid})
     _auto_display("agent", "health", result)
+    result.setdefault("agentId", aid)
+    return result
 
 
 # ── Task ───────────────────────────────────────────────────────────────────
@@ -1451,7 +1603,7 @@ def _handle_doctor_run(args: dict):
 # Handler registry -- maps "cmd_sub" to custom handler function
 # ---------------------------------------------------------------------------
 
-CUSTOM_HANDLERS: dict[str, Callable[..., None]] = {
+CUSTOM_HANDLERS: dict[str, Callable[..., dict | None]] = {
     # Swarm
     "swarm_init":              _handle_swarm_init,
     "swarm_start":             _handle_swarm_start,
