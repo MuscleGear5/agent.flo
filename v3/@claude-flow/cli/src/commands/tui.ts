@@ -248,7 +248,7 @@ async function handleMemory(sub: string, args: string[]): Promise<CommandResult>
         kvTable(data as KV, 'Memory Compress');
         return { success: true };
       }
-      if (sub === 'stats' || sub === 'configure') {
+      if (sub === 'configure') {
         const data = await tool('memory_stats');
         kvTable(data as KV, 'Memory Config');
         return { success: true };
@@ -419,7 +419,7 @@ async function handleSwarm(sub: string, args: string[]): Promise<CommandResult> 
   const { positional, flags } = parseArgs(args);
   switch (sub) {
     case 'status': {
-      const [sw, pool, td] = await Promise.all([
+      const [_sw, pool, td] = await Promise.all([
         tool('swarm_status').catch(() => ({})),
         tool('agent_list').catch(() => ({ agents: [] })),
         tool('task_list').catch(() => ({ tasks: [] })),
@@ -731,6 +731,181 @@ async function handleNeural(sub: string, args: string[]): Promise<CommandResult>
       const d = data as KV;
       return d.modelId ? ok(`Imported: ${d.modelId}`) : fail('Import failed');
     }
+    case 'autosetup': {
+      const mode = (positional[0] ?? flags.mode ?? 'full') as string;
+      const steps: { name: string; fn: () => Promise<KV> }[] = [];
+      const results: { step: string; status: string; detail: string }[] = [];
+
+      out.writeln('');
+      out.writeln(out.bold('Neural Auto-Setup — Ultra Agentic Configuration'));
+      out.writeln(out.dim('─'.repeat(52)));
+
+      // Step 1: Train MoE router
+      steps.push({ name: 'Train MoE Router (8 experts)', fn: async () => {
+        return await tool('neural_train', { modelType: 'moe', epochs: 50, learningRate: 0.001 });
+      }});
+
+      // Step 2: Train transformer for task routing
+      steps.push({ name: 'Train Transformer (task routing)', fn: async () => {
+        return await tool('neural_train', { modelType: 'transformer', epochs: 20, learningRate: 0.001 });
+      }});
+
+      // Step 3: Train embedding model
+      steps.push({ name: 'Train Embedding Model (semantic)', fn: async () => {
+        return await tool('neural_train', { modelType: 'embedding', epochs: 50, batchSize: 64, learningRate: 0.0005 });
+      }});
+
+      // Step 4: Train classifier for routing decisions
+      steps.push({ name: 'Train Classifier (agent selection)', fn: async () => {
+        return await tool('neural_train', { modelType: 'classifier', epochs: 30, learningRate: 0.002 });
+      }});
+
+      // Step 5: Seed memory with architectural patterns
+      const memorySeeds = [
+        { key: 'arch-ddd', ns: 'patterns', val: 'DDD bounded contexts: agent-lifecycle, coordination, task-execution, memory, infrastructure' },
+        { key: 'arch-embedding', ns: 'patterns', val: 'Tiered embedding: agentic-flow WASM > @claude-flow/embeddings > memory-initializer ONNX > hash-based' },
+        { key: 'arch-mcp', ns: 'patterns', val: 'MCP tools are in-process via callMCPTool, not subprocess. JSON-RPC over stdio for external.' },
+        { key: 'arch-ruvector', ns: 'patterns', val: 'RuVector: SONA + MoE(8 experts) + HNSW(150x-12500x) + FlashAttention(2.49-7.47x) + LoRA(128x mem reduction) + EWC++' },
+        { key: 'routing-agents', ns: 'patterns', val: 'Agent types: coder, tester, reviewer, architect, security, performance, researcher, coordinator. Route by task complexity.' },
+        { key: 'routing-models', ns: 'patterns', val: '3-tier model routing: Tier1 AgentBooster WASM <1ms $0, Tier2 Haiku ~500ms $0.0002, Tier3 Sonnet/Opus 2-5s $0.003+' },
+        { key: 'ops-swarm', ns: 'patterns', val: 'hierarchical-mesh topology, 8-15 agents, specialized strategy, raft consensus. Anti-drift: smaller teams + coordinator.' },
+        { key: 'ops-hooks', ns: 'patterns', val: '27 hooks + 12 workers. Workers: ultralearn, optimize, consolidate, predict, audit, map, preload, deepdive, document, refactor, benchmark, testgaps.' },
+      ];
+      steps.push({ name: `Seed Memory (${memorySeeds.length} patterns)`, fn: async () => {
+        let stored = 0;
+        for (const s of memorySeeds) {
+          try {
+            await tool('memory_store', { key: s.key, value: s.val, namespace: s.ns });
+            stored++;
+          } catch { /* skip */ }
+        }
+        return { stored, total: memorySeeds.length };
+      }});
+
+      // Step 6: Store diverse pattern types to fix the all-action problem
+      const diversePatterns = [
+        { type: 'decision', name: 'model-selection', metadata: { context: 'routing', agent: 'coordinator' } },
+        { type: 'optimization', name: 'hnsw-search-speedup', metadata: { factor: '150x-12500x', component: 'memory' } },
+        { type: 'coordination', name: 'hierarchical-mesh-topology', metadata: { maxAgents: 15, drift: 'low' } },
+        { type: 'error', name: 'missing-better-sqlite3', metadata: { fix: 'npm install better-sqlite3', severity: 'medium' } },
+        { type: 'security', name: 'input-validation-boundary', metadata: { pattern: 'validate-at-edges', tools: 'zod' } },
+        { type: 'decision', name: 'tdd-london-school', metadata: { approach: 'mock-first', framework: 'vitest' } },
+        { type: 'optimization', name: 'flash-attention-tiling', metadata: { strategy: 'block-wise-L1-cache', speedup: '2.49-7.47x' } },
+        { type: 'coordination', name: 'queen-worker-consensus', metadata: { protocol: 'raft', faultTolerance: 'n/2' } },
+      ];
+      steps.push({ name: `Store Diverse Patterns (${diversePatterns.length} types)`, fn: async () => {
+        let stored = 0;
+        for (const p of diversePatterns) {
+          try {
+            await tool('neural_patterns', {
+              action: 'store', name: p.name, type: p.type,
+              metadata: p.metadata, input: `${p.type}: ${p.name}`,
+            });
+            stored++;
+          } catch { /* skip */ }
+        }
+        return { stored, total: diversePatterns.length };
+      }});
+
+      // Step 7: Run benchmark
+      steps.push({ name: 'Benchmark Models', fn: async () => {
+        return await tool('neural_benchmark');
+      }});
+
+      // Step 8: Dispatch background workers
+      const workers = ['map', 'audit', 'consolidate', 'predict'];
+      steps.push({ name: `Dispatch Workers (${workers.join(', ')})`, fn: async () => {
+        let dispatched = 0;
+        for (const w of workers) {
+          try {
+            await tool('hooks_worker', { action: 'dispatch', trigger: w });
+            dispatched++;
+          } catch { /* skip */ }
+        }
+        return { dispatched, total: workers.length };
+      }});
+
+      // Step 9: Record routing trajectories
+      steps.push({ name: 'Bootstrap Routing Intelligence', fn: async () => {
+        const tasks = [
+          { task: 'implement feature with tests', context: 'typescript,vitest,ddd' },
+          { task: 'fix bug in MCP tool handler', context: 'mcp-tools,debugging' },
+          { task: 'security audit of input validation', context: 'security,cve' },
+          { task: 'optimize HNSW search performance', context: 'performance,hnsw' },
+          { task: 'refactor agent lifecycle module', context: 'refactor,ddd,agent' },
+          { task: 'deploy new release across packages', context: 'deployment,npm,publish' },
+        ];
+        let routed = 0;
+        for (const t of tasks) {
+          try {
+            await tool('hooks_route', { task: t.task, context: t.context });
+            routed++;
+          } catch { /* skip */ }
+        }
+        return { routed, total: tasks.length };
+      }});
+
+      // Step 10: Final status
+      steps.push({ name: 'Verify Setup', fn: async () => {
+        const [status, patterns, mem] = await Promise.all([
+          tool('neural_status', { detailed: true }),
+          tool('neural_patterns', { action: 'list' }),
+          tool('memory_stats'),
+        ]);
+        return {
+          models: (status as KV).models,
+          patternCount: ((patterns as KV).patterns as KV[] ?? []).length,
+          memoryEntries: (mem as KV).totalEntries,
+          embeddingCoverage: (mem as KV).embeddingCoverage,
+          features: (status as KV).features,
+        };
+      }});
+
+      // Execute all steps
+      const skip = mode === 'quick' ? [1, 2, 6, 8] : []; // quick mode skips some training
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        if (skip.includes(i)) {
+          results.push({ step: step.name, status: 'skipped', detail: '(quick mode)' });
+          out.writeln(`  ${out.dim('○')} ${out.dim(step.name)} ${out.dim('(skipped)')}`);
+          continue;
+        }
+        out.write(`  ◌ ${step.name}...`);
+        try {
+          const r = await step.fn();
+          const detail = Object.entries(r as KV)
+            .filter(([k]) => !['success', 'raw'].includes(k))
+            .slice(0, 3)
+            .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+            .join(', ');
+          results.push({ step: step.name, status: 'done', detail: detail.slice(0, 60) });
+          out.writeln(`\r  ${out.success('●')} ${step.name} ${out.dim(detail.slice(0, 50))}`);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          results.push({ step: step.name, status: 'error', detail: msg.slice(0, 60) });
+          out.writeln(`\r  ${out.error('✗')} ${step.name} ${out.dim(msg.slice(0, 40))}`);
+        }
+      }
+
+      // Summary table
+      out.writeln('');
+      out.printTable({
+        columns: [
+          { key: 'step', header: 'Step' },
+          { key: 'status', header: 'Status', format: v => sc(v) },
+          { key: 'detail', header: 'Detail' },
+        ],
+        data: results,
+        border: true, header: true,
+      });
+
+      const passed = results.filter(r => r.status === 'done').length;
+      const total = results.length;
+      out.writeln('');
+      out.writeln(out.bold(`Auto-setup complete: ${passed}/${total} steps succeeded`));
+      out.writeln('');
+      return { success: passed > total / 2 };
+    }
     default: return fail(`Unknown neural sub: ${sub}`);
   }
 }
@@ -863,7 +1038,7 @@ async function handleMcp(sub: string, args: string[]): Promise<CommandResult> {
 // Hooks
 // ---------------------------------------------------------------------------
 
-async function handleHooks(sub: string, args: string[]): Promise<CommandResult> {
+async function handleHooks(sub: string, _args: string[]): Promise<CommandResult> {
   switch (sub) {
     case 'list': {
       const data = await tool('hooks_list');

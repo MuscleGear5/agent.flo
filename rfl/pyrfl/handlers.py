@@ -42,6 +42,7 @@ _CLI_PASSTHROUGH: frozenset[str] = frozenset({
     "init_check",
     "daemon_start", "daemon_stop", "daemon_status", "daemon_restart",
     "daemon_logs", "daemon_enable",
+    "neural_autosetup",
 })
 
 # Commands that define params but work fine with no args (params are optional filters)
