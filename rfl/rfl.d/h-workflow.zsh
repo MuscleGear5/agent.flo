@@ -27,7 +27,7 @@ try:
 except Exception as e: print(f'ERR: {e}',file=sys.stderr)
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border thick --print
+        echo "$_table" | gum table --separator '|' --border bold --print
       else
         print -P "  %F{245}(none)%f"
       fi
@@ -73,7 +73,7 @@ if w:
         print(f'{k}|{s}')
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border thick --print
+        echo "$_table" | gum table --separator '|' --border bold --print
       else
         print -P "  %F{245}(not found)%f"
       fi
@@ -112,7 +112,7 @@ except: pass
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
         print -P "%BWorkflow Templates%b"
         echo ""
-        echo "$_table" | gum table --separator '|' --border thick --print
+        echo "$_table" | gum table --separator '|' --border bold --print
       else
         print -P "  %F{245}(no templates)%f"
       fi

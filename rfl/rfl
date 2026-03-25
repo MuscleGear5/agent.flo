@@ -140,7 +140,7 @@ _fzf_out=$(printf '%s\n' "${unified[@]}" | fzf \
   --print-query \
   --query="$_main_query" \
   --prompt="ruflo [AI:$_ai_label] > " \
-  --border=rounded \
+  --border=bold \
   --border-label=" Ruflo  Multi-agent orchestration " \
   --border-label-pos=3 \
   --preview="$PREVIEW_DIR/unified_preview.sh {} $PREVIEW_DIR" \
@@ -208,7 +208,7 @@ while true; do
     --print-query \
     --query="$_cat_query" \
     --prompt="  [AI:$_ai_label] > " \
-    --border=rounded \
+    --border=bold \
     --border-label=" $CATEGORY " \
     --border-label-pos=3 \
     --preview="$PREVIEW_DIR/cmd_preview.sh {1} {2}" \

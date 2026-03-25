@@ -12,7 +12,7 @@ box() {
   local title="$1"
   local subtitle="$2"
   local color="${3:-141}"
-  gum style --border thick --border-foreground "$color" --padding "0 2" \
+  gum style --border bold --border-foreground "$color" --padding "0 2" \
     --foreground "$color" --bold "$title" ${subtitle:+$subtitle}
 }
 

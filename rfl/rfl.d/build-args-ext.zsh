@@ -127,6 +127,12 @@ _rfl_build_args_ext() {
       ;;
 
     # ── performance ──
+    performance:metrics)
+      local -a opts=()
+      opts=($(gum choose --no-limit --header="Metrics options" --header.foreground=7 \
+        -- "--format json" "--format table" "--period 1h" "--period 24h" "--period 7d"))
+      (( ${#opts} > 0 )) && args="${(j: :)opts}"
+      ;;
     performance:benchmark)
       local -a opts=()
       opts=($(gum choose --no-limit --header="Benchmark options" --header.foreground=7 \

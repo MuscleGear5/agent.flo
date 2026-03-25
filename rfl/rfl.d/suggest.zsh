@@ -306,7 +306,7 @@ if not found:
 
     picked=$(printf '%s\n' "${valid_labels[@]}" | fzf \
       --prompt="suggest > " \
-      --border=thick \
+      --border=bold \
       --border-label=" Suggested next steps " \
       --border-label-pos=3 \
       --preview="$_preview_cmd" \

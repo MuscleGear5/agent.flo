@@ -187,6 +187,13 @@ build_args() {
       ;;
 
     # ── neural ──
+    neural:status|neural:list)
+      ;; # no args needed
+    neural:patterns)
+      local filter=$(gum input --placeholder "pattern filter (optional)" \
+        --header "Filter patterns" --header.foreground=245 --width 50)
+      [[ -n "$filter" ]] && args="${filter// /__RFL_SP__}"
+      ;;
     neural:train)
       local -a opts=()
       opts=($(gum choose --no-limit --header="Training options" --header.foreground=7 \

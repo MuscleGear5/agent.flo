@@ -26,7 +26,7 @@ try:
 except Exception as e: print(f'ERR: {e}',file=sys.stderr)
 " 2>/dev/null)
       if [[ -n "$_table" && $(echo "$_table" | wc -l) -gt 1 ]]; then
-        echo "$_table" | gum table --separator '|' --border thick --print
+        echo "$_table" | gum table --separator '|' --border bold --print
       else
         print -P "  %F{245}(none)%f"
       fi
