@@ -342,34 +342,23 @@ def confirm(label: str, default: bool = False) -> bool:
 
 
 def _fzf(args: list[str], choices_text: str) -> str:
-    """Run fzf with proper terminal state — save/restore termios around call."""
-    import os, termios
-    tty_fd = None
-    old_attrs = None
+    """Run fzf after resetting the terminal to a sane state."""
+    # Rich spinners leave the tty in raw mode with mouse tracking.
+    # `stty sane` resets everything: canonical mode, echo, no mouse.
     try:
-        tty_fd = os.open("/dev/tty", os.O_RDWR)
-        old_attrs = termios.tcgetattr(tty_fd)
-    except (OSError, termios.error):
+        with open("/dev/tty") as tty:
+            subprocess.run(["stty", "sane"], stdin=tty, check=False)
+    except OSError:
         pass
 
-    try:
-        proc = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=None,
-        )
-        stdout, _ = proc.communicate(input=choices_text.encode())
-        return stdout.decode().strip() if proc.returncode == 0 else ""
-    finally:
-        # Restore terminal state — Rich spinners can leave it dirty.
-        if tty_fd is not None and old_attrs is not None:
-            try:
-                termios.tcsetattr(tty_fd, termios.TCSANOW, old_attrs)
-            except termios.error:
-                pass
-        if tty_fd is not None:
-            os.close(tty_fd)
+    proc = subprocess.Popen(
+        args,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=None,
+    )
+    stdout, _ = proc.communicate(input=choices_text.encode())
+    return stdout.decode().strip() if proc.returncode == 0 else ""
 
 
 def choose(label: str, choices: list[str]) -> str | None:
