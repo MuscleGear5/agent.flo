@@ -335,19 +335,24 @@ def confirm(label: str, default: bool = False) -> bool:
     return Confirm.ask(label, default=default)
 
 
-def _reset_mouse():
-    """Disable terminal mouse tracking modes that leak into subprocesses."""
-    import sys as _sys
-    if _sys.stderr.isatty():
-        _sys.stderr.write("\033[?1000l\033[?1002l\033[?1003l\033[?1006l")
-        _sys.stderr.flush()
+def _flush_tty():
+    """Drain queued input (mouse events etc) from the tty before fzf."""
+    try:
+        import termios, os
+        fd = os.open("/dev/tty", os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            termios.tcflush(fd, termios.TCIFLUSH)
+        finally:
+            os.close(fd)
+    except (ImportError, OSError):
+        pass
 
 
 def choose(label: str, choices: list[str]) -> str | None:
     """fzf selector — falls back to Rich numbered prompt."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            _reset_mouse()
+            _flush_tty()
             proc = subprocess.run(
                 ["fzf", "--no-sort", "--no-mouse",
                  f"--height={min(len(choices) + 4, 20)}",
@@ -383,7 +388,7 @@ def multi_choose(label: str, choices: list[str]) -> list[str]:
     """fzf multi-select — falls back to Rich comma-separated input."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            _reset_mouse()
+            _flush_tty()
             proc = subprocess.run(
                 ["fzf", "--multi", "--no-sort", "--no-mouse",
                  f"--height={min(len(choices) + 4, 20)}",
