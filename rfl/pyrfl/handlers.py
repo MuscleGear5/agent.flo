@@ -53,7 +53,7 @@ _OPTIONAL_PARAMS: frozenset[str] = frozenset({
     "neural_patterns", "neural_benchmark", "neural_optimize", "neural_list",
     "embeddings_status", "embeddings_init",
     "performance_metrics", "performance_benchmark", "performance_bottleneck",
-    "analyze_deps",
+    "analyze_code", "analyze_deps", "analyze_complexity", "analyze_imports",
     "analyze_circular", "analyze_boundaries", "analyze_modules",
     "analyze_dependencies",
     "hooks_metrics", "hooks_list", "hooks_intelligence",
@@ -226,8 +226,6 @@ def _smart_pick(param_name: str, label: str = "") -> str | None:
         return Prompt.ask(f"  {lbl}")
     if pn in ("workflowid", "templateid"):
         return _pick_workflow(lbl)
-    if pn in ("path", "file", "filepath", "filename", "target"):
-        return _pick_path(lbl)
 
     # Not an ID — fall back to text prompt
     return None
@@ -410,59 +408,6 @@ def _pick_workflow(label: str = "Select workflow") -> str | None:
     if not sel:
         return None
     return sel.split()[0]
-
-
-def _pick_path(label: str = "Select file") -> str | None:
-    """File/directory picker — fzf browse, entire project, or type manually."""
-    modes = [
-        ".  (entire project)",
-        "Browse files (fzf)",
-        "Type path manually",
-    ]
-    sel = ui.choose(label, modes)
-    if not sel:
-        return None
-
-    if sel.startswith("."):
-        return "."
-
-    if sel.startswith("Browse"):
-        # fzf file browser
-        if shutil.which("fzf"):
-            try:
-                # Use fd if available, fall back to find
-                if shutil.which("fd"):
-                    lister = ["fd", "--type", "f", "--hidden", "--exclude", ".git",
-                              "--exclude", "node_modules", "--exclude", "dist"]
-                else:
-                    lister = ["find", ".", "-type", "f",
-                              "-not", "-path", "./.git/*",
-                              "-not", "-path", "./node_modules/*",
-                              "-not", "-path", "./dist/*"]
-                files = subprocess.run(lister, capture_output=True, text=True, timeout=10)
-                proc = subprocess.Popen(
-                    ["fzf", "--height=20", "--border=bold",
-                     f"--border-label= {label} ",
-                     "--border-label-pos=3",
-                     f"--color={ui._FZF_COLORS}",
-                     "--pointer=>", "--no-info",
-                     "--preview=head -40 {}",
-                     "--preview-window=right:50%:wrap"],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=None,
-                )
-                stdout, _ = proc.communicate(input=files.stdout.encode())
-                if proc.returncode == 0 and stdout.strip():
-                    return stdout.decode().strip()
-                return None
-            except Exception:
-                pass
-        # fzf unavailable — fall through to manual
-        ui.warn("fzf not available, type path manually")
-
-    val = Prompt.ask(f"  {label}")
-    return val if val else None
 
 
 def _pick_config_key(label: str = "Select config key") -> str | None:
