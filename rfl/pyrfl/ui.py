@@ -341,26 +341,50 @@ def confirm(label: str, default: bool = False) -> bool:
     return Confirm.ask(label, default=default)
 
 
+def _fzf(args: list[str], choices_text: str) -> str:
+    """Run fzf with proper terminal state — save/restore termios around call."""
+    import os, termios
+    tty_fd = None
+    old_attrs = None
+    try:
+        tty_fd = os.open("/dev/tty", os.O_RDWR)
+        old_attrs = termios.tcgetattr(tty_fd)
+    except (OSError, termios.error):
+        pass
+
+    try:
+        proc = subprocess.Popen(
+            args,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=None,
+        )
+        stdout, _ = proc.communicate(input=choices_text.encode())
+        return stdout.decode().strip() if proc.returncode == 0 else ""
+    finally:
+        # Restore terminal state — Rich spinners can leave it dirty.
+        if tty_fd is not None and old_attrs is not None:
+            try:
+                termios.tcsetattr(tty_fd, termios.TCSANOW, old_attrs)
+            except termios.error:
+                pass
+        if tty_fd is not None:
+            os.close(tty_fd)
+
+
 def choose(label: str, choices: list[str]) -> str | None:
     """fzf selector — falls back to Rich numbered prompt."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            # fzf reads keyboard from /dev/tty — pipe choices via stdin,
-            # capture selection on stdout, let stderr inherit the terminal.
-            proc = subprocess.Popen(
+            result = _fzf(
                 ["fzf", "--no-sort",
                  f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
                  "--pointer=>", "--no-info"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=None,  # inherit terminal
+                "\n".join(choices),
             )
-            stdout, _ = proc.communicate(input="\n".join(choices).encode())
-            if proc.returncode == 0 and stdout.strip():
-                return stdout.decode().strip()
-            return None
+            return result or None
         except Exception:
             pass
     # Fallback
@@ -384,20 +408,17 @@ def multi_choose(label: str, choices: list[str]) -> list[str]:
     """fzf multi-select — falls back to Rich comma-separated input."""
     if shutil.which("fzf") and len(choices) > 1:
         try:
-            proc = subprocess.Popen(
+            result = _fzf(
                 ["fzf", "--multi", "--no-sort",
                  f"--height={min(len(choices) + 4, 20)}",
                  "--border=bold", f"--border-label= {label} ",
                  "--border-label-pos=3", f"--color={_FZF_COLORS}",
                  "--pointer=>", "--marker=*", "--no-info",
                  "--header=  space toggle  │  enter confirm  │  esc cancel"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=None,  # inherit terminal
+                "\n".join(choices),
             )
-            stdout, _ = proc.communicate(input="\n".join(choices).encode())
-            if proc.returncode == 0 and stdout.strip():
-                return [ln for ln in stdout.decode().strip().split("\n") if ln]
+            if result:
+                return [ln for ln in result.split("\n") if ln]
             return []
         except Exception:
             pass
