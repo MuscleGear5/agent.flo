@@ -120,6 +120,8 @@ bd remember "insight" # Persistent knowledge across sessions
 ## Active Technologies
 - Zsh 5.9+ (shell scripts), Python 3.10+ (inline parsing) + gum (charmbracelet) 0.13+, fzf 0.40+, ruflo CLI (npm) (001-fix-rfl-rewire)
 - N/A (rfl is a stateless wrapper; state lives in `.claude-flow/`) (001-fix-rfl-rewire)
+- Python 3.10+ + Rich (console, table, panel, prompt) (002-pyrfl-modularization)
+- N/A (stateless display utilities) (002-pyrfl-modularization)
 
 ## Recent Changes
 - 001-fix-rfl-rewire: Added Zsh 5.9+ (shell scripts), Python 3.10+ (inline parsing) + gum (charmbracelet) 0.13+, fzf 0.40+, ruflo CLI (npm)

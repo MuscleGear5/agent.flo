@@ -285,29 +285,34 @@ def show_suggestions(cmd: str, sub: str) -> bool:
     tmp.write(preview_script)
     tmp.close()
 
+    # Use temp file for input to avoid pipe buffering issues with fzf
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as tf:
+        tf.write(fzf_input)
+        tf_name = tf.name
+
     try:
-        fzf_input = "\n".join(labels)
-        proc = subprocess.run(
-            ["fzf",
-             "--prompt=suggest > ",
-             "--border=bold",
-             "--border-label= Suggested next steps ",
-             "--border-label-pos=3",
-             f"--preview=python3 {tmp.name} {{}}",
-             "--preview-window=right:45%:wrap:hidden",
-             "--preview-label= Why? ",
-             "--preview-label-pos=3",
-             "--height=50%",
-             "--margin=1,2",
-             "--no-sort",
-             f"--color={ui._FZF_COLORS}",
-             "--header=  enter select  |  ? detail  |  esc back",
-             "--header-first",
-             "--pointer=>",
-             "--bind=?:toggle-preview",
-             "--no-info"],
-            input=fzf_input, capture_output=True, text=True,
-        )
+        with open(tf_name, "r") as f:
+            proc = subprocess.run(
+                ["fzf",
+                 "--prompt=suggest > ",
+                 "--border=bold",
+                 "--border-label= Suggested next steps ",
+                 "--border-label-pos=3",
+                 f"--preview=python3 {tmp.name} {{}}",
+                 "--preview-window=right:45%:wrap:hidden",
+                 "--preview-label= Why? ",
+                 "--preview-label-pos=3",
+                 "--height=50%",
+                 "--margin=1,2",
+                 "--no-sort",
+                 f"--color={ui._FZF_COLORS}",
+                 "--header=  enter select  |  ? detail  |  esc back",
+                 "--header-first",
+                 "--pointer=>",
+                 "--bind=?:toggle-preview",
+                 "--no-info"],
+                stdin=f, stdout=subprocess.PIPE, text=True,
+            )
 
         if proc.returncode != 0:
             return False
@@ -339,6 +344,10 @@ def show_suggestions(cmd: str, sub: str) -> bool:
     finally:
         try:
             os.unlink(tmp.name)
+        except OSError:
+            pass
+        try:
+            os.unlink(tf_name)
         except OSError:
             pass
 

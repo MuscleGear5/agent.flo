@@ -255,20 +255,37 @@ def _fzf_category(pdir: str, cat_name: str) -> None:
 def _fzf_action(cmd: str, sub: str) -> str | None:
     """Show Run/Explain/Cancel action picker via fzf."""
     actions = "Run\nExplain\nCancel"
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as tf_in:
+        tf_in.write(actions)
+        tf_in_name = tf_in.name
+    
+    tf_out_name = tf_in_name + ".out"
+
     try:
-        proc = subprocess.run(
-            ["fzf", "--no-sort", "--height=6", "--border=bold",
-             f"--border-label= pyrfl > {cmd} > {sub} ",
-             "--border-label-pos=3",
-             f"--color={_FZF_COLORS}",
-             "--pointer=>", "--no-info"],
-            input=actions, capture_output=True, text=True,
-        )
+        with open(tf_in_name, "r") as f_in, open(tf_out_name, "w") as f_out:
+            proc = subprocess.run(
+                ["fzf", "--no-sort", "--height=6", "--border=bold",
+                 f"--border-label= pyrfl > {cmd} > {sub} ",
+                 "--border-label-pos=3",
+                 f"--color={_FZF_COLORS}",
+                 "--pointer=>", "--no-info"],
+                stdin=f_in, stdout=f_out,
+            )
+        
         if proc.returncode != 0:
             return None
-        return proc.stdout.strip()
+            
+        with open(tf_out_name, "r") as f_read:
+            return f_read.read().strip()
     except Exception:
         return None
+    finally:
+        for f in (tf_in_name, tf_out_name):
+            try:
+                if os.path.exists(f):
+                    os.unlink(f)
+            except OSError:
+                pass
 
 
 def _fzf_run_command(cmd: str, sub: str) -> None:
@@ -300,7 +317,7 @@ def _explain(cmd: str, sub: str) -> None:
     try:
         proc = subprocess.run(
             ["ruflo", "--v3-mode", cmd, sub, "--help"],
-            capture_output=True, text=True, timeout=10,
+            stdout=subprocess.PIPE, text=True, timeout=10,
         )
         if proc.stdout.strip():
             console.print(proc.stdout.strip())
@@ -358,14 +375,27 @@ def _run_fzf(
         for b in extra_binds:
             cmd.append(f"--bind={b}")
 
+    # Use temp files for input/output to avoid pipe buffering issues with fzf
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as tf_in:
+        tf_in.write(input_text)
+        tf_in_name = tf_in.name
+    
+    tf_out_name = tf_in_name + ".out"
+
     try:
-        proc = subprocess.run(
-            cmd, input=input_text, capture_output=True, text=True,
-        )
+        with open(tf_in_name, "r") as f_in, open(tf_out_name, "w") as f_out:
+            proc = subprocess.run(
+                cmd, stdin=f_in, stdout=f_out,
+            )
+        
         if proc.returncode not in (0, 1):
             # 130 = esc, 2 = error
             return None
-        lines = proc.stdout.strip().split("\n")
+            
+        with open(tf_out_name, "r") as f_read:
+            output = f_read.read()
+            
+        lines = output.splitlines()
         if expect:
             # --print-query + --expect: line0=query, line1=key, line2=selected
             return {
@@ -373,14 +403,23 @@ def _run_fzf(
                 "key": lines[1] if len(lines) > 1 else "",
                 "selected": lines[2] if len(lines) > 2 else "",
             }
+        
         if proc.returncode != 0:
             return None
+            
         return {
             "query": lines[0] if lines else "",
             "selected": lines[1] if len(lines) > 1 else "",
         }
     except Exception:
         return None
+    finally:
+        for f in (tf_in_name, tf_out_name):
+            try:
+                if os.path.exists(f):
+                    os.unlink(f)
+            except OSError:
+                pass
 
 
 # ── Rich fallback (no fzf) ───────────────────────────────────────
